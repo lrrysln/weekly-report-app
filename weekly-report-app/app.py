@@ -1,192 +1,160 @@
-{\rtf1\ansi\ansicpg1252\cocoartf2639
-\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fmodern\fcharset0 Courier;\f1\fnil\fcharset0 AppleColorEmoji;\f2\fnil\fcharset0 Menlo-Regular;
-}
-{\colortbl;\red255\green255\blue255;\red195\green123\blue90;\red23\green23\blue26;\red174\green176\blue183;
-\red103\green107\blue114;\red89\green158\blue96;\red71\green149\blue242;\red152\green54\blue29;\red117\green114\blue185;
-\red38\green157\blue169;\red31\green46\blue49;}
-{\*\expandedcolortbl;;\csgenericrgb\c76471\c48235\c35294;\csgenericrgb\c9020\c9020\c10196;\csgenericrgb\c68235\c69020\c71765;
-\csgenericrgb\c40392\c41961\c44706;\csgenericrgb\c34902\c61961\c37647;\csgenericrgb\c27843\c58431\c94902;\csgenericrgb\c59608\c21176\c11373;\csgenericrgb\c45882\c44706\c72549;
-\csgenericrgb\c14902\c61569\c66275;\csgenericrgb\c12157\c18039\c19216;}
-\margl1440\margr1440\vieww11520\viewh8400\viewkind0
-\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
+import streamlit as st
+import pandas as pd
+import datetime
+import re
+from pathlib import Path
 
-\f0\fs26 \cf2 \cb3 import \cf4 streamlit \cf2 as \cf4 st\
-\cf2 import \cf4 pandas \cf2 as \cf4 pd\
-\cf2 import \cf4 datetime\
-\cf2 import \cf4 re\
-\cf2 from \cf4 pathlib \cf2 import \cf4 Path\
-\
-\cf5 # Paths\
-\cf4 DOWNLOADS = Path.home() / \cf6 "Downloads"\
-\
-\cf5 # Utility functions\
-\cf2 def \cf7 get_current_week_folder\cf4 ():\
-    today = datetime.datetime.now()\
-    week_num = today.isocalendar().week\
-    \cf2 return \cf4 DOWNLOADS / \cf6 f"Week \cf2 \{\cf4 week_num\cf2 \} \{\cf4 today.year\cf2 \}\cf6 "\
-\
-\cf2 def \cf7 get_weekly_filename\cf4 ():\
-    today = datetime.datetime.now()\
-    week_num = today.isocalendar().week\
-    \cf2 return \cf6 f"Week \cf2 \{\cf4 week_num\cf2 \} \{\cf4 today.year\cf2 \}\cf6  Report.html"\
-\
-\cf2 def \cf7 save_to_excel\cf4 (entry_data):\
-    week_folder = get_current_week_folder()\
-    week_folder.mkdir(\cf8 parents\cf4 =\cf2 True\cf4 , \cf8 exist_ok\cf4 =\cf2 True\cf4 )\
-    existing = \cf9 list\cf4 (week_folder.glob(\cf6 "file*.xlsx"\cf4 ))\
-    index = \cf9 len\cf4 (existing) + \cf10 1\
-    \cf4 path = week_folder / \cf6 f"file\cf2 \{\cf4 index\cf2 \}\cf6 .xlsx"\
-    \cf4 pd.DataFrame([entry_data]).to_excel(path, \cf8 index\cf4 =\cf2 False\cf4 , \cf8 engine\cf4 =\cf6 "openpyxl"\cf4 )\
-\
-\cf2 def \cf7 generate_weekly_summary\cf4 (password):\
-    \cf2 if \cf4 password != \cf6 "1234"\cf4 :\
-        \cf2 return None\cf4 , \cf6 "\cf2 \\n
-\f1 \cf6 \uc0\u10060 
-\f0  Incorrect password."\
-    \cf4 week_folder = get_current_week_folder()\
-    \cf2 if not \cf4 week_folder.exists():\
-        \cf2 return None\cf4 , \cf6 "
-\f1 \uc0\u9888 \u65039 
-\f0  There have been no entries submitted this week."\
-\
-    \cf4 files = \cf9 sorted\cf4 (week_folder.glob(\cf6 "file*.xlsx"\cf4 ))\
-    \cf2 if not \cf4 files:\
-        \cf2 return None\cf4 , \cf6 "
-\f1 \uc0\u9888 \u65039 
-\f0  There have been no entries submitted this week."\
-\
-    \cf4 df = pd.concat((pd.read_excel(f, \cf8 engine\cf4 =\cf6 "openpyxl"\cf4 ) \cf2 for \cf4 f \cf2 in \cf4 files), \cf8 ignore_index\cf4 =\cf2 True\cf4 )\
-    \cf2 if \cf4 df.empty:\
-        \cf2 return None\cf4 , \cf6 "
-\f1 \uc0\u55357 \u57003 
-\f0  No data to summarize."\
-\
-    \cf4 df.sort_values(\cf6 "Subject"\cf4 , \cf8 inplace\cf4 =\cf2 True\cf4 )\
-\
-    html = [\cf6 "<html><head><style>"\cf4 ,\
-            \cf6 "body\{font-family:Arial;padding:20px\}"\cf4 ,\
-            \cf6 "h1\{text-align:center\}"\cf4 ,\
-            \cf6 "h2\{background:#cce5ff;padding:10px;border-radius:4px\}"\cf4 ,\
-            \cf6 ".entry\{border:1px solid #ccc;padding:10px;margin:10px 0;border-radius:4px;background:#f9f9f9\}"\cf4 ,\
-            \cf6 "ul\{margin:0;padding-left:20px\}"\cf4 ,\
-            \cf6 ".label\{font-weight:bold\}"\cf4 ,\
-            \cf6 "</style></head><body>"\cf4 ,\
-            \cf6 "<h1>Weekly Summary Report</h1>"\cf4 ]\
-\
-    \cf2 for \cf4 subject, group \cf2 in \cf4 df.groupby(\cf6 "Subject"\cf4 ):\
-        html.append(\cf6 f"<h2>\cf2 \{\cf4 subject\cf2 \}\cf6 </h2>"\cf4 )\
-        \cf2 for \cf4 _, row \cf2 in \cf4 group.iterrows():\
-            html.append(\cf6 '<div class="entry"><ul>'\cf4 )\
-            html.append(\cf6 f"<li><span class='label'>Store Name:</span> \cf2 \{\cf4 row.get(\cf6 'Store Name'\cf4 , \cf6 ''\cf4 )\cf2 \}\cf6 </li>"\cf4 )\
-            html.append(\cf6 f"<li><span class='label'>Store Number:</span> \cf2 \{\cf4 row.get(\cf6 'Store Number'\cf4 , \cf6 ''\cf4 )\cf2 \}\cf6 </li>"\cf4 )\
-\
-            types = [col \cf2 for \cf4 col \cf2 in\
-                     \cf4 [\cf6 "RaceWay EDO Stores"\cf4 , \cf6 "RT EFC - Traditional"\cf4 , \cf6 "RT 5.5k EDO Stores"\cf4 , \cf6 "RT EFC EDO Stores"\cf4 ,\
-                      \cf6 "RT Travel Centers"\cf4 ] \cf2 if \cf4 row.get(col)]\
-            \cf2 if \cf4 types:\
-                html.append(\cf6 "<li><span class='label'>Types:</span><ul>"\cf4 )\
-                html += [\cf6 f"<li>\cf2 \{\cf4 t\cf2 \}\cf6 </li>" \cf2 for \cf4 t \cf2 in \cf4 types]\
-                html.append(\cf6 "</ul></li>"\cf4 )\
-\
-            html.append(\cf6 "<li><span class='label'>Dates:</span><ul>"\cf4 )\
-            \cf2 for \cf4 label \cf2 in \cf4 [\cf6 "TCO Date"\cf4 , \cf6 "Ops Walk Date"\cf4 , \cf6 "Turnover Date"\cf4 , \cf6 "Open to Train Date"\cf4 , \cf6 "Store Opening"\cf4 ]:\
-                html.append(\cf6 f"<li><span class='label'>\cf2 \{\cf4 label\cf2 \}\cf6 :</span> \cf2 \{\cf4 row.get(label, \cf6 ''\cf4 )\cf2 \}\cf6 </li>"\cf4 )\
-            html.append(\cf6 "</ul></li>"\cf4 )\
-\
-            notes = [\
-                re.sub(\cf6 r"\cb11 ^[\\s\'95\\-\'96
-\f2 \uc0\u9679 
-\f0 ]+\cb3 "\cf4 , \cf6 ""\cf4 , n)\
-                \cf2 for \cf4 n \cf2 in \cf9 str\cf4 (row.get(\cf6 "Notes"\cf4 , \cf6 ""\cf4 )).splitlines()\
-                \cf2 if \cf4 n.strip()\
-            ]\
-            \cf2 if \cf4 notes:\
-                html.append(\cf6 "<li><span class='label'>Notes:</span><ul>"\cf4 )\
-                html += [\cf6 f"<li>\cf2 \{\cf4 n\cf2 \}\cf6 </li>" \cf2 for \cf4 n \cf2 in \cf4 notes]\
-                html.append(\cf6 "</ul></li>"\cf4 )\
-\
-            html.append(\cf6 "</ul></div>"\cf4 )\
-\
-    html.append(\cf6 "</body></html>"\cf4 )\
-    \cf2 return \cf4 df, \cf6 ""\cf4 .join(html)\
-\
-\cf2 def \cf7 save_html_report\cf4 (html_content):\
-    week_folder = get_current_week_folder()\
-    week_folder.mkdir(\cf8 parents\cf4 =\cf2 True\cf4 , \cf8 exist_ok\cf4 =\cf2 True\cf4 )\
-    filename = get_weekly_filename()\
-    path = week_folder / filename\
-    \cf2 with \cf9 open\cf4 (path, \cf6 "w"\cf4 , \cf8 encoding\cf4 =\cf6 "utf-8"\cf4 ) \cf2 as \cf4 f:\
-        f.write(html_content)\
-    \cf2 return \cf4 path\
-\
-\cf5 # Streamlit UI\
-\cf4 st.title(\cf6 "
-\f1 \uc0\u55357 \u56541 
-\f0  Weekly Store Report Form"\cf4 )\
-\
-\cf2 with \cf4 st.form(\cf6 "entry_form"\cf4 ):\
-    st.subheader(\cf6 "Store Info"\cf4 )\
-    store_name = st.text_input(\cf6 "Store Name"\cf4 )\
-    store_number = st.text_input(\cf6 "Store Number"\cf4 )\
-\
-    st.subheader(\cf6 "Project Details"\cf4 )\
-    subject = st.selectbox(\cf6 "Subject"\cf4 , [\
-        \cf6 "New Construction"\cf4 , \cf6 "EDO Additions"\cf4 , \cf6 "Phase 1/ Demo - New Construction Sites"\cf4 ,\
-        \cf6 "Remodels"\cf4 , \cf6 "6k Remodels"\cf4 , \cf6 "EV Project"\cf4 , \cf6 "Traditional Special Project"\cf4 ,\
-        \cf6 "Miscellaneous Items of Note"\cf4 , \cf6 "Potential Projects"\cf4 ,\
-        \cf6 "Complete - Awaiting Post Completion Site Visit"\cf4 , \cf6 "2025 Completed Projects"\
-    \cf4 ])\
-\
-    st.subheader(\cf6 "Store Types"\cf4 )\
-    types = \{\
-        \cf6 "RaceWay EDO Stores"\cf4 : st.checkbox(\cf6 "RaceWay EDO Stores"\cf4 ),\
-        \cf6 "RT EFC - Traditional"\cf4 : st.checkbox(\cf6 "RT EFC - Traditional"\cf4 ),\
-        \cf6 "RT 5.5k EDO Stores"\cf4 : st.checkbox(\cf6 "RT 5.5k EDO Stores"\cf4 ),\
-        \cf6 "RT EFC EDO Stores"\cf4 : st.checkbox(\cf6 "RT EFC EDO Stores"\cf4 ),\
-        \cf6 "RT Travel Centers"\cf4 : st.checkbox(\cf6 "RT Travel Centers"\cf4 )\
-    \}\
-\
-    st.subheader(\cf6 "Important Dates"\cf4 )\
-    tco_date = st.date_input(\cf6 "TCO Date"\cf4 , \cf8 format\cf4 =\cf6 "%m/%d/%Y"\cf4 )\
-    ops_walk_date = st.date_input(\cf6 "Ops Walk Date"\cf4 , \cf8 format\cf4 =\cf6 "%m/%d/%Y"\cf4 )\
-    turnover_date = st.date_input(\cf6 "Turnover Date"\cf4 , \cf8 format\cf4 =\cf6 "%m/%d/%Y"\cf4 )\
-    open_to_train_date = st.date_input(\cf6 "Open to Train Date"\cf4 , \cf8 format\cf4 =\cf6 "%m/%d/%Y"\cf4 )\
-    store_opening = st.date_input(\cf6 "Store Opening"\cf4 , \cf8 format\cf4 =\cf6 "%m/%d/%Y"\cf4 )\
-\
-    notes = st.text_area(\cf6 "Notes (Use bullets or dashes)"\cf4 , \cf8 value\cf4 =\cf6 "\'95 "\cf4 , \cf8 height\cf4 =\cf10 200\cf4 )\
-\
-    submitted = st.form_submit_button(\cf6 "Submit"\cf4 )\
-    \cf2 if \cf4 submitted:\
-        data = \{\
-            \cf6 "Store Name"\cf4 : store_name,\
-            \cf6 "Store Number"\cf4 : store_number,\
-            \cf6 "Subject"\cf4 : subject,\
-            \cf6 "TCO Date"\cf4 : tco_date,\
-            \cf6 "Ops Walk Date"\cf4 : ops_walk_date,\
-            \cf6 "Turnover Date"\cf4 : turnover_date,\
-            \cf6 "Open to Train Date"\cf4 : open_to_train_date,\
-            \cf6 "Store Opening"\cf4 : store_opening,\
-            \cf6 "Notes"\cf4 : notes\
-        \}\
-        data.update(types)\
-        save_to_excel(data)\
-        st.success(\cf6 "
-\f1 \uc0\u9989 
-\f0  Entry saved successfully!"\cf4 )\
-\
-st.subheader(\cf6 "
-\f1 \uc0\u55357 \u56592 
-\f0  Generate Weekly Report"\cf4 )\
-report_pw = st.text_input(\cf6 "Enter Password to Generate Report"\cf4 , \cf8 type\cf4 =\cf6 "password"\cf4 )\
-\cf2 if \cf4 st.button(\cf6 "Generate Report"\cf4 ):\
-    df, html = generate_weekly_summary(report_pw)\
-    \cf2 if \cf4 df \cf2 is not None\cf4 :\
-        path = save_html_report(html)\
-        st.success(\cf6 f"
-\f1 \uc0\u9989 
-\f0  Report generated and saved to: \cf2 \{\cf4 path\cf2 \}\cf6 "\cf4 )\
-        st.download_button(\cf6 "Download Report"\cf4 , html, \cf8 file_name\cf4 =get_weekly_filename(), \cf8 mime\cf4 =\cf6 "text/html"\cf4 )\
-    \cf2 else\cf4 :\
-        st.error(html)\
-\
-}
+# Paths
+DOWNLOADS = Path.home() / "Downloads"
+
+# Utility functions
+def get_current_week_folder():
+    today = datetime.datetime.now()
+    week_num = today.isocalendar().week
+    return DOWNLOADS / f"Week {week_num} {today.year}"
+
+def get_weekly_filename():
+    today = datetime.datetime.now()
+    week_num = today.isocalendar().week
+    return f"Week {week_num} {today.year} Report.html"
+
+def save_to_excel(entry_data):
+    week_folder = get_current_week_folder()
+    week_folder.mkdir(parents=True, exist_ok=True)
+    existing = list(week_folder.glob("file*.xlsx"))
+    index = len(existing) + 1
+    path = week_folder / f"file{index}.xlsx"
+    pd.DataFrame([entry_data]).to_excel(path, index=False, engine="openpyxl")
+
+def generate_weekly_summary(password):
+    if password != "1234":
+        return None, "\n❌ Incorrect password."
+    week_folder = get_current_week_folder()
+    if not week_folder.exists():
+        return None, "⚠️ There have been no entries submitted this week."
+
+    files = sorted(week_folder.glob("file*.xlsx"))
+    if not files:
+        return None, "⚠️ There have been no entries submitted this week."
+
+    df = pd.concat((pd.read_excel(f, engine="openpyxl") for f in files), ignore_index=True)
+    if df.empty:
+        return None, "🚫 No data to summarize."
+
+    df.sort_values("Subject", inplace=True)
+
+    html = ["<html><head><style>",
+            "body{font-family:Arial;padding:20px}",
+            "h1{text-align:center}",
+            "h2{background:#cce5ff;padding:10px;border-radius:4px}",
+            ".entry{border:1px solid #ccc;padding:10px;margin:10px 0;border-radius:4px;background:#f9f9f9}",
+            "ul{margin:0;padding-left:20px}",
+            ".label{font-weight:bold}",
+            "</style></head><body>",
+            "<h1>Weekly Summary Report</h1>"]
+
+    for subject, group in df.groupby("Subject"):
+        html.append(f"<h2>{subject}</h2>")
+        for _, row in group.iterrows():
+            html.append('<div class="entry"><ul>')
+            html.append(f"<li><span class='label'>Store Name:</span> {row.get('Store Name', '')}</li>")
+            html.append(f"<li><span class='label'>Store Number:</span> {row.get('Store Number', '')}</li>")
+
+            types = [col for col in
+                     ["RaceWay EDO Stores", "RT EFC - Traditional", "RT 5.5k EDO Stores", "RT EFC EDO Stores",
+                      "RT Travel Centers"] if row.get(col)]
+            if types:
+                html.append("<li><span class='label'>Types:</span><ul>")
+                html += [f"<li>{t}</li>" for t in types]
+                html.append("</ul></li>")
+
+            html.append("<li><span class='label'>Dates:</span><ul>")
+            for label in ["TCO Date", "Ops Walk Date", "Turnover Date", "Open to Train Date", "Store Opening"]:
+                html.append(f"<li><span class='label'>{label}:</span> {row.get(label, '')}</li>")
+            html.append("</ul></li>")
+
+            notes = [
+                re.sub(r"^[\s•\-–●]+", "", n)
+                for n in str(row.get("Notes", "")).splitlines()
+                if n.strip()
+            ]
+            if notes:
+                html.append("<li><span class='label'>Notes:</span><ul>")
+                html += [f"<li>{n}</li>" for n in notes]
+                html.append("</ul></li>")
+
+            html.append("</ul></div>")
+
+    html.append("</body></html>")
+    return df, "".join(html)
+
+def save_html_report(html_content):
+    week_folder = get_current_week_folder()
+    week_folder.mkdir(parents=True, exist_ok=True)
+    filename = get_weekly_filename()
+    path = week_folder / filename
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(html_content)
+    return path
+
+# Streamlit UI
+st.title("📝 Weekly Store Report Form")
+
+with st.form("entry_form"):
+    st.subheader("Store Info")
+    store_name = st.text_input("Store Name")
+    store_number = st.text_input("Store Number")
+
+    st.subheader("Project Details")
+    subject = st.selectbox("Subject", [
+        "New Construction", "EDO Additions", "Phase 1/ Demo - New Construction Sites",
+        "Remodels", "6k Remodels", "EV Project", "Traditional Special Project",
+        "Miscellaneous Items of Note", "Potential Projects",
+        "Complete - Awaiting Post Completion Site Visit", "2025 Completed Projects"
+    ])
+
+    st.subheader("Store Types")
+    types = {
+        "RaceWay EDO Stores": st.checkbox("RaceWay EDO Stores"),
+        "RT EFC - Traditional": st.checkbox("RT EFC - Traditional"),
+        "RT 5.5k EDO Stores": st.checkbox("RT 5.5k EDO Stores"),
+        "RT EFC EDO Stores": st.checkbox("RT EFC EDO Stores"),
+        "RT Travel Centers": st.checkbox("RT Travel Centers")
+    }
+
+    st.subheader("Important Dates")
+    tco_date = st.date_input("TCO Date", format="%m/%d/%Y")
+    ops_walk_date = st.date_input("Ops Walk Date", format="%m/%d/%Y")
+    turnover_date = st.date_input("Turnover Date", format="%m/%d/%Y")
+    open_to_train_date = st.date_input("Open to Train Date", format="%m/%d/%Y")
+    store_opening = st.date_input("Store Opening", format="%m/%d/%Y")
+
+    notes = st.text_area("Notes (Use bullets or dashes)", value="• ", height=200)
+
+    submitted = st.form_submit_button("Submit")
+    if submitted:
+        data = {
+            "Store Name": store_name,
+            "Store Number": store_number,
+            "Subject": subject,
+            "TCO Date": tco_date,
+            "Ops Walk Date": ops_walk_date,
+            "Turnover Date": turnover_date,
+            "Open to Train Date": open_to_train_date,
+            "Store Opening": store_opening,
+            "Notes": notes
+        }
+        data.update(types)
+        save_to_excel(data)
+        st.success("✅ Entry saved successfully!")
+
+st.subheader("🔐 Generate Weekly Report")
+report_pw = st.text_input("Enter Password to Generate Report", type="password")
+if st.button("Generate Report"):
+    df, html = generate_weekly_summary(report_pw)
+    if df is not None:
+        path = save_html_report(html)
+        st.success(f"✅ Report generated and saved to: {path}")
+        st.download_button("Download Report", html, file_name=get_weekly_filename(), mime="text/html")
+    else:
+        st.error(html)
