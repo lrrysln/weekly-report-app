@@ -1,63 +1,55 @@
 import streamlit as st
 from datetime import datetime
+import base64
 
-# Page config
-st.set_page_config(page_title="Weekly Construction Report", layout="centered")
-st.title("Weekly Site Update Submission")
+st.set_page_config(page_title="Weekly Report Generator", layout="centered")
+st.title("Weekly Construction Update Generator")
 
-# Form Start
-with st.form("weekly_report_form"):
-    submitted_by = st.text_input("Your Name")
-    project_name = st.text_input("Project Name")
-    project_id = st.text_input("Project ID")
-    update_date = st.date_input("Date of Update", format="MM/DD/YY")
+# --- Form Input ---
+with st.form("update_form", clear_on_submit=True):
+    update_date = st.date_input("Date of Update")
+    prototype = st.selectbox("Prototype", ["6K Remodel", "10K New Build", "20K New Build"])
+    site = st.text_input("Site Name")
+    cpm = st.text_input("CPM")
+    start_date = st.date_input("Construction Start")
+    tco = st.date_input("TCO Date")
+    turnover = st.date_input("Turnover Date")
+    notes = st.text_area("Notes (use bullets with Enter between each line)")
+    submitted = st.form_submit_button("Submit")
 
-    # Key Dates
-    st.subheader("Key Construction Dates")
-    permit_date = st.date_input("Permit Received")
-    mobilization_date = st.date_input("Mobilization Start")
-    concrete_date = st.date_input("Concrete Pour Date")
-    tco_date = st.date_input("TCO Date")
-    turnover_date = st.date_input("Turnover to Ops")
-
-    # General Notes
-    st.subheader("Weekly Notes")
-    notes = st.text_area("Add bullet points for site progress, delays, weather, or issues:", placeholder="\n- Framing completed on main structure\n- Waiting on inspection scheduling\n- Rain delayed landscaping work")
-
-    # File Uploads
-    uploaded_files = st.file_uploader("Upload relevant documents (PDFs, Images, etc.)", type=None, accept_multiple_files=True)
-
-    submitted = st.form_submit_button("Submit Report")
-
-# Handle Submission
+# --- Display Report + HTML Download ---
 if submitted:
-    if not submitted_by or not project_name or not project_id:
-        st.warning("Please complete all required fields.")
-    else:
-        st.success(f"✅ Weekly report submitted for project: {project_name}")
+    # Convert line breaks in notes to HTML bullet points
+    bullet_notes = "".join(f"<li>{line.strip()}</li>" for line in notes.splitlines() if line.strip())
+    report_date = update_date.strftime("%m/%d/%y")
+    start_date_fmt = start_date.strftime("%m/%d/%y")
+    tco_fmt = tco.strftime("%m/%d/%y")
+    turnover_fmt = turnover.strftime("%m/%d/%y")
 
-        st.markdown("---")
-        st.markdown(f"**Submitted by:** {submitted_by}")
-        st.markdown(f"**Project:** {project_name} ({project_id})")
-        st.markdown(f"**Date:** {update_date.strftime('%m/%d/%y')}")
+    html_report = f"""
+    <html>
+    <body>
+        <h2>Weekly Construction Update</h2>
+        <p><strong>Date of Update:</strong> {report_date}</p>
+        <p><strong>Prototype:</strong> {prototype}</p>
+        <p><strong>Site:</strong> {site}</p>
+        <p><strong>CPM:</strong> {cpm}</p>
+        <p><strong>Construction Start:</strong> {start_date_fmt}</p>
+        <p><strong>TCO Date:</strong> {tco_fmt}</p>
+        <p><strong>Turnover Date:</strong> {turnover_fmt}</p>
+        <p><strong>Notes:</strong></p>
+        <ul>
+            {bullet_notes}
+        </ul>
+    </body>
+    </html>
+    """
 
-        st.markdown("### 📅 Key Dates")
-        st.markdown(f"- Permit Received: {permit_date.strftime('%m/%d/%y')}")
-        st.markdown(f"- Mobilization Start: {mobilization_date.strftime('%m/%d/%y')}")
-        st.markdown(f"- Concrete Pour: {concrete_date.strftime('%m/%d/%y')}")
-        st.markdown(f"- TCO Date: {tco_date.strftime('%m/%d/%y')}")
-        st.markdown(f"- Turnover: {turnover_date.strftime('%m/%d/%y')}")
+    # Display the HTML report inline
+    st.markdown("### 📋 Generated Report")
+    st.components.v1.html(html_report, height=500, scrolling=True)
 
-        if notes:
-            st.markdown("### 📝 Weekly Notes")
-            bullet_points = notes.split("\n")
-            for point in bullet_points:
-                if point.strip():
-                    st.markdown(f"- {point.strip()}")
-
-        if uploaded_files:
-            st.markdown("### 📎 Uploaded Files")
-            for file in uploaded_files:
-                st.markdown(f"- {file.name}")
-
-        # Optional: Log the data, send an email, or write to a database/file here
+    # Offer download button
+    b64 = base64.b64encode(html_report.encode()).decode()
+    href = f'<a href="data:text/html;base64,{b64}" download="weekly_report_{site}_{report_date}.html">📥 Download HTML Report</a>'
+    st.markdown(href, unsafe_allow_html=True)
