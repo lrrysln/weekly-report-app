@@ -4,8 +4,8 @@ import datetime
 import re
 from pathlib import Path
 
-# --- Constants ---
-LOGO_BASE64 = "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"
+# Page config
+st.set_page_config(page_title="Weekly Construction Report", layout="centered")
 
 # Paths
 DOWNLOADS = Path.home() / "Downloads"
@@ -29,11 +29,6 @@ def save_to_excel(entry_data):
     path = week_folder / f"file{index}.xlsx"
     pd.DataFrame([entry_data]).to_excel(path, index=False, engine="openpyxl")
 
-def format_date_mmddyy(date_obj):
-    if isinstance(date_obj, (datetime.date, datetime.datetime)):
-        return date_obj.strftime("%m,%d,%y")
-    return ""
-
 def generate_weekly_summary(password):
     if password != "1234":
         return None, "\n❌ Incorrect password."
@@ -51,20 +46,15 @@ def generate_weekly_summary(password):
 
     df.sort_values("Subject", inplace=True)
 
-    # Start building HTML with embedded logo top-right
-    html = [
-        "<html><head><style>",
-        "body{font-family:Arial;padding:20px;position:relative;}",
-        "h1{text-align:center;margin-bottom:40px;}",
-        "h2{background:#cce5ff;padding:10px;border-radius:4px;margin-top:30px;}",
-        ".entry{border:1px solid #ccc;padding:10px;margin:10px 0;border-radius:4px;background:#f9f9f9}",
-        "ul{margin:0;padding-left:20px;}",
-        ".label{font-weight:bold;}",
-        ".logo {position:absolute; top:10px; right:10px; width:100px;}",
-        "</style></head><body>",
-        f'<img class="logo" src="data:image/png;base64,{LOGO_BASE64}" alt="Logo"/>',
-        "<h1>Weekly Summary Report</h1>"
-    ]
+    html = ["<html><head><style>",
+            "body{font-family:Arial;padding:20px}",
+            "h1{text-align:center}",
+            "h2{background:#cce5ff;padding:10px;border-radius:4px}",
+            ".entry{border:1px solid #ccc;padding:10px;margin:10px 0;border-radius:4px;background:#f9f9f9}",
+            "ul{margin:0;padding-left:20px}",
+            ".label{font-weight:bold}",
+            "</style></head><body>",
+            "<h1>Weekly Summary Report</h1>"]
 
     for subject, group in df.groupby("Subject"):
         html.append(f"<h2>{subject}</h2>")
@@ -73,32 +63,27 @@ def generate_weekly_summary(password):
             html.append(f"<li><span class='label'>Store Name:</span> {row.get('Store Name', '')}</li>")
             html.append(f"<li><span class='label'>Store Number:</span> {row.get('Store Number', '')}</li>")
 
-            types = [col for col in
-                     ["RaceWay EDO Stores", "RT EFC - Traditional", "RT 5.5k EDO Stores", "RT EFC EDO Stores",
-                      "RT Travel Centers"] if row.get(col)]
+            types = [col for col in [
+                "RaceWay EDO Stores", "RT EFC - Traditional", "RT 5.5k EDO Stores",
+                "RT EFC EDO Stores", "RT Travel Centers"] if row.get(col)]
             if types:
                 html.append("<li><span class='label'>Types:</span><ul>")
                 html += [f"<li>{t}</li>" for t in types]
                 html.append("</ul></li>")
 
-            # Format all date fields MM,DD,YY
             html.append("<li><span class='label'>Dates:</span><ul>")
             for label in ["TCO Date", "Ops Walk Date", "Turnover Date", "Open to Train Date", "Store Opening"]:
-                dt = row.get(label, "")
-                if pd.isna(dt):
-                    formatted = ""
-                else:
-                    try:
-                        dt_parsed = pd.to_datetime(dt)
-                        formatted = format_date_mmddyy(dt_parsed)
-                    except Exception:
-                        formatted = str(dt)
-                html.append(f"<li><span class='label'>{label}:</span> {formatted}</li>")
+                date_val = row.get(label, '')
+                if isinstance(date_val, pd.Timestamp):
+                    date_val = date_val.strftime('%m/%d/%y')
+                html.append(f"<li><span class='label'>{label}:</span> {date_val}</li>")
             html.append("</ul></li>")
 
-            # Clean notes: strip bullet characters from each line, then add bullets
-            raw_notes = str(row.get("Notes", ""))
-            notes = [re.sub(r"^[\s•\-–●]+", "", n).strip() for n in raw_notes.splitlines() if n.strip()]
+            notes = [
+                re.sub(r"^[\s\u2022\-\u2013\u25CF]+", "", n)
+                for n in str(row.get("Notes", "")).splitlines()
+                if n.strip()
+            ]
             if notes:
                 html.append("<li><span class='label'>Notes:</span><ul>")
                 html += [f"<li>{n}</li>" for n in notes]
@@ -118,26 +103,67 @@ def save_html_report(html_content):
         f.write(html_content)
     return path
 
-# --- Streamlit UI ---
-
+# Streamlit UI
 st.title("📝 Weekly Store Report Form")
 
-# Columns for logo and form title
-col1, col2 = st.columns([9,1])
-with col2:
-    st.image(f"data:image/png;base64,{LOGO_BASE64}", width=100)
-
-# Initialize session state for clearing
-if "form_cleared" not in st.session_state:
-    st.session_state.form_cleared = False
-
-def clear_form():
-    st.session_state.form_cleared = True
-
-with st.form("entry_form", clear_on_submit=False):
+with st.form("entry_form", clear_on_submit=True):
     st.subheader("Store Info")
-    store_name = st.text_input("Store Name", key="store_name")
-    store_number = st.text_input("Store Number", key="store_number")
+    store_name = st.text_input("Store Name")
+    store_number = st.text_input("Store Number")
 
     st.subheader("Project Details")
+    subject = st.selectbox("Subject", [
+        "New Construction", "EDO Additions", "Phase 1/ Demo - New Construction Sites",
+        "Remodels", "6k Remodels", "EV Project", "Traditional Special Project",
+        "Miscellaneous Items of Note", "Potential Projects",
+        "Complete - Awaiting Post Completion Site Visit", "2025 Completed Projects"])
+
+    st.subheader("Store Types")
+    types = {
+        "RaceWay EDO Stores": st.checkbox("RaceWay EDO Stores"),
+        "RT EFC - Traditional": st.checkbox("RT EFC - Traditional"),
+        "RT 5.5k EDO Stores": st.checkbox("RT 5.5k EDO Stores"),
+        "RT EFC EDO Stores": st.checkbox("RT EFC EDO Stores"),
+        "RT Travel Centers": st.checkbox("RT Travel Centers")
+    }
+
+    st.subheader("Important Dates")
+    tco_date = st.date_input("TCO Date", format="%m/%d/%y")
+    ops_walk_date = st.date_input("Ops Walk Date", format="%m/%d/%y")
+    turnover_date = st.date_input("Turnover Date", format="%m/%d/%y")
+    open_to_train_date = st.date_input("Open to Train Date", format="%m/%d/%y")
+    store_opening = st.date_input("Store Opening", format="%m/%d/%y")
+
+    notes_input = st.text_area("Notes (Press Enter for new bullet line)", placeholder="- First note\n- Second note", height=200)
+    formatted_notes = "\n".join([f"- {re.sub(r'^[-\s•–●]*', '', line)}" for line in notes_input.splitlines() if line.strip()])
+
+    submitted = st.form_submit_button("Submit")
+
+    if submitted:
+        data = {
+            "Store Name": store_name,
+            "Store Number": store_number,
+            "Subject": subject,
+            "TCO Date": tco_date,
+            "Ops Walk Date": ops_walk_date,
+            "Turnover Date": turnover_date,
+            "Open to Train Date": open_to_train_date,
+            "Store Opening": store_opening,
+            "Notes": formatted_notes
+        }
+        data.update(types)
+        save_to_excel(data)
+        st.success("✅ Entry saved successfully!")
+
+st.subheader("🔐 Generate Weekly Report")
+report_pw = st.text_input("Enter Password to Generate Report", type="password")
+if st.button("Generate Report"):
+    df, html = generate_weekly_summary(report_pw)
+    if df is not None:
+        path = save_html_report(html)
+        st.success(f"✅ Report generated and saved to: {path}")
+        st.download_button("Download Report", html, file_name=get_weekly_filename(), mime="text/html")
+        st.components.v1.html(html, height=800, scrolling=True)
+    else:
+        st.error(html)
 
