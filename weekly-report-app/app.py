@@ -10,26 +10,29 @@ with st.form("weekly_report_form"):
     submitted_by = st.text_input("Your Name")
     project_name = st.text_input("Project Name")
     project_id = st.text_input("Project ID")
-    update_date = st.date_input("Date of Update", format="MM/DD/YY")
+    update_date = st.date_input("Date of Update")
 
     # Key Dates
     st.subheader("Key Construction Dates")
-    permit_date = st.date_input("Permit Received", format="MM/DD/YY")
-    mobilization_date = st.date_input("Mobilization Start", format="MM/DD/YY")
-    concrete_date = st.date_input("Concrete Pour Date", format="MM/DD/YY")
-    tco_date = st.date_input("TCO Date", format="MM/DD/YY")
-    turnover_date = st.date_input("Turnover to Ops", format="MM/DD/YY")
+    permit_date = st.date_input("Permit Received")
+    mobilization_date = st.date_input("Mobilization Start")
+    concrete_date = st.date_input("Concrete Pour Date")
+    tco_date = st.date_input("TCO Date")
+    turnover_date = st.date_input("Turnover to Ops")
 
     # General Notes
     st.subheader("Weekly Notes")
     notes = st.text_area(
         "Add bullet points for site progress, delays, weather, or issues:",
-        placeholder="\n- Framing completed on main structure\n- Waiting on inspection scheduling\n- Rain delayed landscaping work"
+        placeholder="- Framing completed on main structure\n- Waiting on inspection scheduling\n- Rain delayed landscaping work"
     )
 
     # File Uploads
-    uploaded_files = st.file_uploader("Upload relevant documents (PDFs, Images, etc.)", type=None, accept_multiple_files=True)
+    uploaded_files = st.file_uploader(
+        "Upload relevant documents (PDFs, Images, etc.)", type=None, accept_multiple_files=True
+    )
 
+    # Submit Button (MUST be inside the form block)
     submitted = st.form_submit_button("Submit Report")
 
 # Handle Submission
@@ -62,3 +65,4 @@ if submitted:
             st.markdown("### 📎 Uploaded Files")
             for file in uploaded_files:
                 st.markdown(f"- {file.name}")
+
