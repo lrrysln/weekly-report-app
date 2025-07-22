@@ -4,6 +4,9 @@ import datetime
 import re
 from pathlib import Path
 
+# Page config
+st.set_page_config(page_title="Weekly Construction Report", layout="centered")
+
 # Paths
 DOWNLOADS = Path.home() / "Downloads"
 
@@ -60,9 +63,9 @@ def generate_weekly_summary(password):
             html.append(f"<li><span class='label'>Store Name:</span> {row.get('Store Name', '')}</li>")
             html.append(f"<li><span class='label'>Store Number:</span> {row.get('Store Number', '')}</li>")
 
-            types = [col for col in
-                     ["RaceWay EDO Stores", "RT EFC - Traditional", "RT 5.5k EDO Stores", "RT EFC EDO Stores",
-                      "RT Travel Centers"] if row.get(col)]
+            types = [col for col in [
+                "RaceWay EDO Stores", "RT EFC - Traditional", "RT 5.5k EDO Stores",
+                "RT EFC EDO Stores", "RT Travel Centers"] if row.get(col)]
             if types:
                 html.append("<li><span class='label'>Types:</span><ul>")
                 html += [f"<li>{t}</li>" for t in types]
@@ -70,11 +73,14 @@ def generate_weekly_summary(password):
 
             html.append("<li><span class='label'>Dates:</span><ul>")
             for label in ["TCO Date", "Ops Walk Date", "Turnover Date", "Open to Train Date", "Store Opening"]:
-                html.append(f"<li><span class='label'>{label}:</span> {row.get(label, '')}</li>")
+                date_val = row.get(label, '')
+                if isinstance(date_val, pd.Timestamp):
+                    date_val = date_val.strftime('%m/%d/%y')
+                html.append(f"<li><span class='label'>{label}:</span> {date_val}</li>")
             html.append("</ul></li>")
 
             notes = [
-                re.sub(r"^[\s•\-–●]+", "", n)
+                re.sub(r"^[\s\u2022\-\u2013\u25CF]+", "", n)
                 for n in str(row.get("Notes", "")).splitlines()
                 if n.strip()
             ]
@@ -100,7 +106,7 @@ def save_html_report(html_content):
 # Streamlit UI
 st.title("📝 Weekly Store Report Form")
 
-with st.form("entry_form"):
+with st.form("entry_form", clear_on_submit=True):
     st.subheader("Store Info")
     store_name = st.text_input("Store Name")
     store_number = st.text_input("Store Number")
@@ -110,8 +116,7 @@ with st.form("entry_form"):
         "New Construction", "EDO Additions", "Phase 1/ Demo - New Construction Sites",
         "Remodels", "6k Remodels", "EV Project", "Traditional Special Project",
         "Miscellaneous Items of Note", "Potential Projects",
-        "Complete - Awaiting Post Completion Site Visit", "2025 Completed Projects"
-    ])
+        "Complete - Awaiting Post Completion Site Visit", "2025 Completed Projects"])
 
     st.subheader("Store Types")
     types = {
@@ -123,15 +128,17 @@ with st.form("entry_form"):
     }
 
     st.subheader("Important Dates")
-    tco_date = st.date_input("TCO Date")
-    ops_walk_date = st.date_input("Ops Walk Date")
-    turnover_date = st.date_input("Turnover Date")
-    open_to_train_date = st.date_input("Open to Train Date")
-    store_opening = st.date_input("Store Opening")
+    tco_date = st.date_input("TCO Date", format="%m/%d/%y")
+    ops_walk_date = st.date_input("Ops Walk Date", format="%m/%d/%y")
+    turnover_date = st.date_input("Turnover Date", format="%m/%d/%y")
+    open_to_train_date = st.date_input("Open to Train Date", format="%m/%d/%y")
+    store_opening = st.date_input("Store Opening", format="%m/%d/%y")
 
-    notes = st.text_area("Notes (Use bullets or dashes)", value="• ", height=200)
+    notes_input = st.text_area("Notes (Press Enter for new bullet line)", placeholder="- First note\n- Second note", height=200)
+    formatted_notes = "\n".join([f"- {re.sub(r'^[-\s•–●]*', '', line)}" for line in notes_input.splitlines() if line.strip()])
 
     submitted = st.form_submit_button("Submit")
+
     if submitted:
         data = {
             "Store Name": store_name,
@@ -142,7 +149,7 @@ with st.form("entry_form"):
             "Turnover Date": turnover_date,
             "Open to Train Date": open_to_train_date,
             "Store Opening": store_opening,
-            "Notes": notes
+            "Notes": formatted_notes
         }
         data.update(types)
         save_to_excel(data)
@@ -156,6 +163,6 @@ if st.button("Generate Report"):
         path = save_html_report(html)
         st.success(f"✅ Report generated and saved to: {path}")
         st.download_button("Download Report", html, file_name=get_weekly_filename(), mime="text/html")
+        st.components.v1.html(html, height=800, scrolling=True)
     else:
         st.error(html)
-
