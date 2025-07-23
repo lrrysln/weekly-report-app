@@ -6,7 +6,7 @@ from pathlib import Path
 import streamlit.components.v1 as components
 
 # ----- CONFIGURATION -----
-PASSWORD = "report2025"
+PASSWORD = "1234"
 SAVE_DIR = Path("reports")
 SAVE_DIR.mkdir(exist_ok=True)
 
