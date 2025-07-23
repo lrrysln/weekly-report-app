@@ -7,7 +7,7 @@ from pathlib import Path
 import streamlit.components.v1 as components
 
 # ----- CONFIGURATION -----
-PASSWORD = "1234"
+PASSWORD = "report2025"
 SAVE_DIR = Path("reports")
 SAVE_DIR.mkdir(exist_ok=True)
 
@@ -18,11 +18,6 @@ def format_date(d):
 def process_notes(notes):
     lines = notes.strip().split("\n")
     bullet_lines = [f"\u2022 {line.lstrip('• ').strip()}" for line in lines if line.strip()]
-    return "\n".join(bullet_lines)
-
-def process_entry(field):
-    lines = str(field).strip().split("\n")
-    bullet_lines = [f"\u2022 {line.strip()}" for line in lines if line.strip()]
     return "\n".join(bullet_lines)
 
 def save_report(data, filename):
@@ -43,15 +38,15 @@ def generate_html(data):
             <h1>Weekly Project Report</h1>
             <h2>{data['subject']}</h2>
             <div class='entry'>
-                <p><strong>Store:</strong><br>{data['store_name'].replace(chr(10), '<br>')}</p>
-                <p><strong>Store Number:</strong><br>{data['store_number'].replace(chr(10), '<br>')}</p>
-                <p><strong>Project Manager:</strong><br>{data['project_manager']}</p>
+                <p><strong>Store:</strong> {data['store_name']}</p>
+                <p><strong>Store Number:</strong> {data['store_number']}</p>
+                <p><strong>Project Manager:</strong> {data['project_manager']}</p>
                 <p><strong>TCO Date:</strong> {data['tco_date']}</p>
                 <p><strong>Ops Walk Date:</strong> {data['ops_walk_date']}</p>
                 <p><strong>Turnover Date:</strong> {data['turnover_date']}</p>
                 <p><strong>Open to Train Date:</strong> {data['open_to_train_date']}</p>
                 <p><strong>Store Opening:</strong> {data['store_opening']}</p>
-                <p><strong>Store Types:</strong><br>{data['store_types'].replace(', ', '<br>')}</p>
+                <p><strong>Store Types:</strong> {data['store_types']}</p>
                 <p><strong>Notes:</strong><br>{data['notes'].replace(chr(10), '<br>')}</p>
             </div>
         </body>
@@ -61,10 +56,10 @@ def generate_html(data):
 # ----- STREAMLIT FORM -----
 st.title("📝 Weekly Store Report Form")
 
-with st.form("entry_form", clear_on_submit=True):
+with st.form("entry_form"):
     st.subheader("Store Info")
-    store_name = st.text_area("Store Name", value="• ")
-    store_number = st.text_area("Store Number", value="• ")
+    store_name = st.text_input("Store Name")
+    store_number = st.text_input("Store Number")
 
     st.subheader("Project Details")
     subject = st.selectbox("Subject", ["Select Subject", "New Construction", "EDO Additions", "Phase 1/ Demo - New Construction Sites",
@@ -115,8 +110,8 @@ with st.form("entry_form", clear_on_submit=True):
 if submitted or submit_entry:
     if password == PASSWORD:
         formatted_data = {
-            "store_name": process_entry(store_name),
-            "store_number": process_entry(store_number),
+            "store_name": store_name,
+            "store_number": store_number,
             "subject": subject,
             "project_manager": project_manager,
             "tco_date": format_date(tco_date),
@@ -124,7 +119,7 @@ if submitted or submit_entry:
             "turnover_date": format_date(turnover_date),
             "open_to_train_date": format_date(open_to_train_date),
             "store_opening": format_date(store_opening),
-            "store_types": process_entry("\n".join(store_types_list)),
+            "store_types": ", ".join(store_types_list),
             "notes": process_notes(notes_input),
         }
 
@@ -135,7 +130,7 @@ if submitted or submit_entry:
             components.html(html_report, height=600, scrolling=True)
 
             timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-            base_filename = f"{formatted_data['store_number'].replace('• ', '').replace(chr(10), '_')}_{timestamp}"
+            base_filename = f"{formatted_data['store_number']}_{timestamp}"
             html_filename = f"{base_filename}.html"
 
             save_report(html_report, html_filename)
