@@ -3,45 +3,43 @@ import pandas as pd
 import datetime
 import re
 from pathlib import Path
+from io import BytesIO
 
-# Paths
-DOWNLOADS = Path.home() / "Downloads"
+# Setup SharePoint-synced folder path (Update this if needed)
+ONEDRIVE_BASE = Path(r"C:\Users\lsloan\OneDrive - RaceTrac Petroleum Inc\Construction Weekly Updates")
 
-# Utility functions
+# Week logic
 def get_current_week_folder():
     today = datetime.datetime.now()
     week_num = today.isocalendar().week
-    return DOWNLOADS / f"Week {week_num} {today.year}"
+    return ONEDRIVE_BASE / f"Week {week_num} {today.year}"
 
-def get_weekly_filename():
-    today = datetime.datetime.now()
-    week_num = today.isocalendar().week
-    return f"Week {week_num} {today.year} Report.html"
+def get_excel_path():
+    folder = get_current_week_folder()
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder / f"Week {datetime.datetime.now().isocalendar().week} {datetime.datetime.now().year}.xlsx"
 
+# Save entry to Excel
 def save_to_excel(entry_data):
-    week_folder = get_current_week_folder()
-    week_folder.mkdir(parents=True, exist_ok=True)
-    existing = list(week_folder.glob("file*.xlsx"))
-    index = len(existing) + 1
-    path = week_folder / f"file{index}.xlsx"
-    pd.DataFrame([entry_data]).to_excel(path, index=False, engine="openpyxl")
+    path = get_excel_path()
+    df = pd.DataFrame([entry_data])
+    if path.exists():
+        existing = pd.read_excel(path, engine='openpyxl')
+        df = pd.concat([existing, df], ignore_index=True)
+    df.to_excel(path, index=False, engine='openpyxl')
 
+# HTML report generation
 def generate_weekly_summary(password):
     if password != "1234":
-        return None, "\n❌ Incorrect password."
-    week_folder = get_current_week_folder()
-    if not week_folder.exists():
-        return None, "⚠️ There have been no entries submitted this week."
+        return None, "❌ Incorrect password."
 
-    files = sorted(week_folder.glob("file*.xlsx"))
-    if not files:
-        return None, "⚠️ There have been no entries submitted this week."
+    path = get_excel_path()
+    if not path.exists():
+        return None, "⚠️ No entries submitted this week."
 
-    df = pd.concat((pd.read_excel(f, engine="openpyxl") for f in files), ignore_index=True)
+    df = pd.read_excel(path, engine='openpyxl')
     if df.empty:
         return None, "🚫 No data to summarize."
-
-    df.sort_values("Subject", inplace=True)
 
     html = ["<html><head><style>",
             "body{font-family:Arial;padding:20px}",
@@ -60,9 +58,9 @@ def generate_weekly_summary(password):
             html.append(f"<li><span class='label'>Store Name:</span> {row.get('Store Name', '')}</li>")
             html.append(f"<li><span class='label'>Store Number:</span> {row.get('Store Number', '')}</li>")
 
-            types = [col for col in
-                     ["RaceWay EDO Stores", "RT EFC - Traditional", "RT 5.5k EDO Stores", "RT EFC EDO Stores",
-                      "RT Travel Centers"] if row.get(col)]
+            types = [col for col in [
+                "RaceWay EDO Stores", "RT EFC - Traditional", "RT 5.5k EDO Stores",
+                "RT EFC EDO Stores", "RT Travel Centers"] if row.get(col)]
             if types:
                 html.append("<li><span class='label'>Types:</span><ul>")
                 html += [f"<li>{t}</li>" for t in types]
@@ -70,14 +68,11 @@ def generate_weekly_summary(password):
 
             html.append("<li><span class='label'>Dates:</span><ul>")
             for label in ["TCO Date", "Ops Walk Date", "Turnover Date", "Open to Train Date", "Store Opening"]:
-                html.append(f"<li><span class='label'>{label}:</span> {row.get(label, '')}</li>")
+                val = pd.to_datetime(row.get(label, ''), errors='coerce')
+                html.append(f"<li><span class='label'>{label}:</span> {val.strftime('%m/%d/%y') if not pd.isna(val) else ''}</li>")
             html.append("</ul></li>")
 
-            notes = [
-                re.sub(r"^[\s•\-–●]+", "", n)
-                for n in str(row.get("Notes", "")).splitlines()
-                if n.strip()
-            ]
+            notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
             if notes:
                 html.append("<li><span class='label'>Notes:</span><ul>")
                 html += [f"<li>{n}</li>" for n in notes]
@@ -88,19 +83,12 @@ def generate_weekly_summary(password):
     html.append("</body></html>")
     return df, "".join(html)
 
-def save_html_report(html_content):
-    week_folder = get_current_week_folder()
-    week_folder.mkdir(parents=True, exist_ok=True)
-    filename = get_weekly_filename()
-    path = week_folder / filename
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(html_content)
-    return path
-
-# Streamlit UI
+# ------------------- Streamlit App -------------------
+st.set_page_config(page_title="Weekly Construction Report", layout="centered")
 st.title("📝 Weekly Store Report Form")
 
-with st.form("entry_form"):
+# Form Input
+with st.form("entry_form", clear_on_submit=True):
     st.subheader("Store Info")
     store_name = st.text_input("Store Name")
     store_number = st.text_input("Store Number")
@@ -122,103 +110,43 @@ with st.form("entry_form"):
         "RT Travel Centers": st.checkbox("RT Travel Centers")
     }
 
-    st.subheader("Important Dates")
+    st.subheader("Important Dates (MM/DD/YY)")
     tco_date = st.date_input("TCO Date")
     ops_walk_date = st.date_input("Ops Walk Date")
     turnover_date = st.date_input("Turnover Date")
     open_to_train_date = st.date_input("Open to Train Date")
     store_opening = st.date_input("Store Opening")
 
-    notes = st.text_area("Notes (Use bullets or dashes)", value="• ", height=200)
+    # Auto-bulleted notes
+    st.subheader("Notes")
+    notes = st.text_area("Notes (each line auto-bulleted)", value="• ", height=200)
 
     submitted = st.form_submit_button("Submit")
+
     if submitted:
         data = {
             "Store Name": store_name,
             "Store Number": store_number,
             "Subject": subject,
-            "TCO Date": tco_date,
-            "Ops Walk Date": ops_walk_date,
-            "Turnover Date": turnover_date,
-            "Open to Train Date": open_to_train_date,
-            "Store Opening": store_opening,
+            "TCO Date": tco_date.strftime('%m/%d/%y'),
+            "Ops Walk Date": ops_walk_date.strftime('%m/%d/%y'),
+            "Turnover Date": turnover_date.strftime('%m/%d/%y'),
+            "Open to Train Date": open_to_train_date.strftime('%m/%d/%y'),
+            "Store Opening": store_opening.strftime('%m/%d/%y'),
             "Notes": notes
         }
         data.update(types)
         save_to_excel(data)
         st.success("✅ Entry saved successfully!")
 
+# Report Generation
 st.subheader("🔐 Generate Weekly Report")
-report_pw = st.text_input("Enter Password to Generate Report", type="password")
+password = st.text_input("Enter Password", type="password")
 if st.button("Generate Report"):
-    df, html = generate_weekly_summary(report_pw)
+    df, html = generate_weekly_summary(password)
     if df is not None:
-        path = save_html_report(html)
-        st.success(f"✅ Report generated and saved to: {path}")
-        st.download_button("Download Report", html, file_name=get_weekly_filename(), mime="text/html")
+        st.success("✅ Report generated below. You can also download it.")
+        st.components.v1.html(html, height=800, scrolling=True)
+        st.download_button("Download HTML Report", data=html, file_name="Weekly_Report.html", mime="text/html")
     else:
         st.error(html)
-
-" and leave it the same aside from the following changes: update all date formats to be "MM/DD/YY", make sure that on the form in the notes section that there is a bullet point and when you click enter to go to a new line a new bullet point appears. use the below to help display the report on the screen after the password for the generate report is successfully compelted, in addition to the options to download. ensure that new reports start with no entries and the form is cleared when a form is submitted. use to help "import streamlit as st 
-from datetime import datetime
-
-# Page config
-st.set_page_config(page_title="Weekly Construction Report", layout="centered")
-st.title("Weekly Site Update Submission")
-
-# Form Start
-with st.form("weekly_report_form"):
-    submitted_by = st.text_input("Your Name")
-    project_name = st.text_input("Project Name")
-    project_id = st.text_input("Project ID")
-    update_date = st.date_input("Date of Update", format="MM/DD/YY")
-
-    # Key Dates
-    st.subheader("Key Construction Dates")
-    permit_date = st.date_input("Permit Received")
-    mobilization_date = st.date_input("Mobilization Start")
-    concrete_date = st.date_input("Concrete Pour Date")
-    tco_date = st.date_input("TCO Date")
-    turnover_date = st.date_input("Turnover to Ops")
-
-    # General Notes
-    st.subheader("Weekly Notes")
-    notes = st.text_area("Add bullet points for site progress, delays, weather, or issues:", placeholder="\n- Framing completed on main structure\n- Waiting on inspection scheduling\n- Rain delayed landscaping work")
-
-    # File Uploads
-    uploaded_files = st.file_uploader("Upload relevant documents (PDFs, Images, etc.)", type=None, accept_multiple_files=True)
-
-    submitted = st.form_submit_button("Submit Report")
-
-# Handle Submission
-if submitted:
-    if not submitted_by or not project_name or not project_id:
-        st.warning("Please complete all required fields.")
-    else:
-        st.success(f"✅ Weekly report submitted for project: {project_name}")
-
-        st.markdown("---")
-        st.markdown(f"**Submitted by:** {submitted_by}")
-        st.markdown(f"**Project:** {project_name} ({project_id})")
-        st.markdown(f"**Date:** {update_date.strftime('%m/%d/%y')}")
-
-        st.markdown("### 📅 Key Dates")
-        st.markdown(f"- Permit Received: {permit_date.strftime('%m/%d/%y')}")
-        st.markdown(f"- Mobilization Start: {mobilization_date.strftime('%m/%d/%y')}")
-        st.markdown(f"- Concrete Pour: {concrete_date.strftime('%m/%d/%y')}")
-        st.markdown(f"- TCO Date: {tco_date.strftime('%m/%d/%y')}")
-        st.markdown(f"- Turnover: {turnover_date.strftime('%m/%d/%y')}")
-
-        if notes:
-            st.markdown("### 📝 Weekly Notes")
-            bullet_points = notes.split("\n")
-            for point in bullet_points:
-                if point.strip():
-                    st.markdown(f"- {point.strip()}")
-
-        if uploaded_files:
-            st.markdown("### 📎 Uploaded Files")
-            for file in uploaded_files:
-                st.markdown(f"- {file.name}")
-
-        # Optional: Log the data, send an email, or write to a database/file here
