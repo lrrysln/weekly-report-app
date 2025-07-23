@@ -9,7 +9,7 @@ st.set_page_config(page_title="Weekly Construction Report", layout="centered")
 st.title("📝 Weekly Store Report Form")
 
 # ✅ SharePoint-synced base path
-BASE_PATH = Path(r"C:\Users\lsloan\RaceTrac\Construction and Engineering Leadership - Documents\General\Larry Sloan\Construction Weekly Updates")
+synced_folder = r"C:\Users\lsloan\RaceTrac\Construction and Engineering Leadership - Documents\General\Larry Sloan\Construction Weekly Updates"
 
 # 🔧 Helper Functions
 def get_current_week_folder():
