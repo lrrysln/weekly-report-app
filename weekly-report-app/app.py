@@ -6,7 +6,8 @@ from pathlib import Path
 from io import BytesIO
 
 # Setup SharePoint-synced folder path (Update this if needed)
-ONEDRIVE_BASE = Path(r"C:\Users\lsloan\OneDrive - RaceTrac Petroleum Inc\Construction Weekly Updates")
+ONEDRIVE_BASE = Path(r"C:\Users\lsloan\RaceTrac\Construction and Engineering Leadership - Documents\General\Larry Sloan\Construction Weekly Updates")
+
 
 # Week logic
 def get_current_week_folder():
