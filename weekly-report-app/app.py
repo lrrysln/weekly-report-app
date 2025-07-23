@@ -3,84 +3,66 @@ import pandas as pd
 from datetime import datetime
 import os
 
-# 🔧 CONFIGURE: Local path synced with SharePoint/OneDrive
-SAVE_FOLDER = r"C:\Users\lsloan\RaceTrac\Construction and Engineering Leadership - Documents\General\Larry Sloan\Construction Weekly Updates"
+# ✅ Path to your synced SharePoint/OneDrive folder
+SYNCED_FOLDER = r"C:\Users\lsloan\RaceTrac\Construction and Engineering Leadership - Documents\General\Larry Sloan\Construction Weekly Updates"
 
-# Helper: Format notes into bullet points
-def format_notes(notes_input):
-    lines = notes_input.strip().split("\n")
-    bullets = "".join([f"<li>{line.strip()}</li>" for line in lines if line.strip()])
-    return f"<ul>{bullets}</ul>" if bullets else ""
+# ✅ Create the file name for this week's file
+today = datetime.today()
+week_number = today.isocalendar()[1]
+year = today.year
+file_name = f"Week {week_number} {year}.xlsx"
+file_path = os.path.join(SYNCED_FOLDER, file_name)
 
-# Helper: Get current week label
-def get_week_label():
-    today = datetime.now()
-    week_num = today.isocalendar().week
-    return f"Week {week_num} {today.year}"
+# ✅ Form UI
+st.title("Weekly Construction Update Form")
 
-# Helper: Get or create weekly Excel file
-def save_submission(data_dict):
-    week_label = get_week_label()
-    filename = f"{week_label}.xlsx"
-    file_path = os.path.join(SAVE_FOLDER, filename)
-
-    new_df = pd.DataFrame([data_dict])
-
-    try:
-        if os.path.exists(file_path):
-            existing_df = pd.read_excel(file_path)
-            updated_df = pd.concat([existing_df, new_df], ignore_index=True)
-        else:
-            updated_df = new_df
-        updated_df.to_excel(file_path, index=False)
-        return True, file_path
-    except Exception as e:
-        return False, str(e)
-
-# ---- Streamlit UI ----
-st.title("Weekly Construction Report Form")
-
-with st.form("entry_form", clear_on_submit=False):
-    st.write("### Submit Construction Update")
-    date = st.date_input("Date", datetime.now())
-    formatted_date = date.strftime("%m/%d/%y")
-
-    project_name = st.text_input("Project Name")
-    prototype = st.selectbox("Prototype", ["GAS", "EV", "Remodel", "Other"])
-    status = st.text_input("Current Status")
-    notes = st.text_area("Notes (press Enter for bullets)", height=150)
+with st.form("weekly_update"):
+    date = st.date_input("Date")
+    prototype = st.text_input("Prototype")
+    address = st.text_input("Address")
+    cpm = st.text_input("CPM")
+    start_date = st.date_input("Start Date")
+    tco_date = st.date_input("TCO Date")
+    turnover_date = st.date_input("Turnover Date")
+    notes = st.text_area("Notes (press enter for new bullet)")
 
     submitted = st.form_submit_button("Submit")
-    clear = st.form_submit_button("Clear")
+    if submitted:
+        try:
+            # Format notes for HTML display
+            notes_html = "<ul>" + "".join([f"<li>{line.strip()}</li>" for line in notes.split("\n") if line.strip()]) + "</ul>"
 
-# Actions on Submit
-if submitted:
-    html_notes = format_notes(notes)
-    submission = {
-        "Date": formatted_date,
-        "Project": project_name,
-        "Prototype": prototype,
-        "Status": status,
-        "Notes": notes,
-        "HTML Notes": html_notes
-    }
+            # Format all dates as MM/DD/YY
+            formatted_date = date.strftime("%m/%d/%y")
+            formatted_start = start_date.strftime("%m/%d/%y")
+            formatted_tco = tco_date.strftime("%m/%d/%y")
+            formatted_turnover = turnover_date.strftime("%m/%d/%y")
 
-    success, msg = save_submission(submission)
-    if success:
-        st.success(f"✅ Entry saved to: {msg}")
-        # Show HTML preview
-        st.markdown("### 🔍 HTML Report Preview")
-        st.markdown(f"""
-        <div>
-            <strong>Date:</strong> {formatted_date}<br>
-            <strong>Project:</strong> {project_name}<br>
-            <strong>Prototype:</strong> {prototype}<br>
-            <strong>Status:</strong> {status}<br>
-            <strong>Notes:</strong> {html_notes}
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.error(f"❌ Failed to save entry: {msg}")
+            # New row of data
+            new_data = {
+                "Date": formatted_date,
+                "Prototype": prototype,
+                "Address": address,
+                "CPM": cpm,
+                "Start Date": formatted_start,
+                "TCO Date": formatted_tco,
+                "Turnover Date": formatted_turnover,
+                "Notes": notes  # raw notes saved, HTML used only for display
+            }
 
-elif clear:
-    st.experimental_rerun()
+            # Check if file exists
+            if os.path.exists(file_path):
+                df = pd.read_excel(file_path)
+                df = pd.concat([df, pd.DataFrame([new_data])], ignore_index=True)
+            else:
+                df = pd.DataFrame([new_data])
+
+            df.to_excel(file_path, index=False)
+            st.success(f"✅ Entry submitted and saved to {file_name}")
+
+            # Optionally: display live HTML preview
+            st.markdown("### Live Report Preview")
+            st.markdown(notes_html, unsafe_allow_html=True)
+
+        except Exception as e:
+            st.error(f"❌ Failed to save entry: {e}")
