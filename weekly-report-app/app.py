@@ -3,33 +3,41 @@ import pandas as pd
 import datetime
 import re
 from pathlib import Path
-from io import BytesIO
 
-# Setup SharePoint-synced folder path (Update this if needed)
-ONEDRIVE_BASE = Path(r"C:\Users\lsloan\RaceTrac\Construction and Engineering Leadership - Documents\General\Larry Sloan\Construction Weekly Updates")
+# Set up Streamlit page
+st.set_page_config(page_title="Weekly Construction Report", layout="centered")
+st.title("📝 Weekly Store Report Form")
 
+# ✅ SharePoint-synced base path
+BASE_PATH = Path(r"C:\Users\lsloan\RaceTrac\Construction and Engineering Leadership - Documents\General\Larry Sloan\Construction Weekly Updates")
 
-# Week logic
+# 🔧 Helper Functions
 def get_current_week_folder():
     today = datetime.datetime.now()
-    week_num = today.isocalendar().week
-    return ONEDRIVE_BASE / f"Week {week_num} {today.year}"
+    week_number = today.isocalendar().week
+    week_folder = BASE_PATH / f"Week {week_number} {today.year}"
+    week_folder.mkdir(parents=True, exist_ok=True)
+    return week_folder
 
 def get_excel_path():
     folder = get_current_week_folder()
-    folder.mkdir(parents=True, exist_ok=True)
-    return folder / f"Week {datetime.datetime.now().isocalendar().week} {datetime.datetime.now().year}.xlsx"
+    week_number = datetime.datetime.now().isocalendar().week
+    year = datetime.datetime.now().year
+    return folder / f"Week {week_number} {year}.xlsx"
 
-# Save entry to Excel
 def save_to_excel(entry_data):
-    path = get_excel_path()
-    df = pd.DataFrame([entry_data])
-    if path.exists():
-        existing = pd.read_excel(path, engine='openpyxl')
-        df = pd.concat([existing, df], ignore_index=True)
-    df.to_excel(path, index=False, engine='openpyxl')
+    excel_path = get_excel_path()
+    new_df = pd.DataFrame([entry_data])
 
-# HTML report generation
+    if excel_path.exists():
+        existing_df = pd.read_excel(excel_path, engine="openpyxl")
+        combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+    else:
+        combined_df = new_df
+
+    combined_df.to_excel(excel_path, index=False, engine="openpyxl")
+    return excel_path
+
 def generate_weekly_summary(password):
     if password != "1234":
         return None, "❌ Incorrect password."
@@ -38,7 +46,7 @@ def generate_weekly_summary(password):
     if not path.exists():
         return None, "⚠️ No entries submitted this week."
 
-    df = pd.read_excel(path, engine='openpyxl')
+    df = pd.read_excel(path, engine="openpyxl")
     if df.empty:
         return None, "🚫 No data to summarize."
 
@@ -69,8 +77,11 @@ def generate_weekly_summary(password):
 
             html.append("<li><span class='label'>Dates:</span><ul>")
             for label in ["TCO Date", "Ops Walk Date", "Turnover Date", "Open to Train Date", "Store Opening"]:
-                val = pd.to_datetime(row.get(label, ''), errors='coerce')
-                html.append(f"<li><span class='label'>{label}:</span> {val.strftime('%m/%d/%y') if not pd.isna(val) else ''}</li>")
+                try:
+                    val = pd.to_datetime(row.get(label, ''), errors='coerce')
+                    html.append(f"<li><span class='label'>{label}:</span> {val.strftime('%m/%d/%y') if not pd.isna(val) else ''}</li>")
+                except:
+                    html.append(f"<li><span class='label'>{label}:</span> {row.get(label, '')}</li>")
             html.append("</ul></li>")
 
             notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
@@ -84,11 +95,12 @@ def generate_weekly_summary(password):
     html.append("</body></html>")
     return df, "".join(html)
 
-# ------------------- Streamlit App -------------------
-st.set_page_config(page_title="Weekly Construction Report", layout="centered")
-st.title("📝 Weekly Store Report Form")
+def get_weekly_filename():
+    today = datetime.datetime.now()
+    week_num = today.isocalendar().week
+    return f"Week {week_num} {today.year} Report.html"
 
-# Form Input
+# 📝 Streamlit Form
 with st.form("entry_form", clear_on_submit=True):
     st.subheader("Store Info")
     store_name = st.text_input("Store Name")
@@ -118,36 +130,40 @@ with st.form("entry_form", clear_on_submit=True):
     open_to_train_date = st.date_input("Open to Train Date")
     store_opening = st.date_input("Store Opening")
 
-    # Auto-bulleted notes
     st.subheader("Notes")
-    notes = st.text_area("Notes (each line auto-bulleted)", value="• ", height=200)
+    notes = st.text_area("Add Notes (Press enter for each bullet)", value="• ", height=200)
 
     submitted = st.form_submit_button("Submit")
 
     if submitted:
-        data = {
+        entry = {
             "Store Name": store_name,
             "Store Number": store_number,
             "Subject": subject,
-            "TCO Date": tco_date.strftime('%m/%d/%y'),
-            "Ops Walk Date": ops_walk_date.strftime('%m/%d/%y'),
-            "Turnover Date": turnover_date.strftime('%m/%d/%y'),
-            "Open to Train Date": open_to_train_date.strftime('%m/%d/%y'),
-            "Store Opening": store_opening.strftime('%m/%d/%y'),
+            "TCO Date": tco_date.strftime("%m/%d/%y"),
+            "Ops Walk Date": ops_walk_date.strftime("%m/%d/%y"),
+            "Turnover Date": turnover_date.strftime("%m/%d/%y"),
+            "Open to Train Date": open_to_train_date.strftime("%m/%d/%y"),
+            "Store Opening": store_opening.strftime("%m/%d/%y"),
             "Notes": notes
         }
-        data.update(types)
-        save_to_excel(data)
-        st.success("✅ Entry saved successfully!")
+        entry.update(types)
 
-# Report Generation
+        try:
+            saved_path = save_to_excel(entry)
+            st.success("✅ Entry saved successfully!")
+            st.info(f"📁 Saved to: `{saved_path}`")
+        except Exception as e:
+            st.error(f"❌ Failed to save entry: {e}")
+
+# 🔐 Report Generation Section
 st.subheader("🔐 Generate Weekly Report")
-password = st.text_input("Enter Password", type="password")
+password = st.text_input("Enter Password to Generate Report", type="password")
 if st.button("Generate Report"):
     df, html = generate_weekly_summary(password)
     if df is not None:
-        st.success("✅ Report generated below. You can also download it.")
+        st.success("✅ Report generated successfully!")
         st.components.v1.html(html, height=800, scrolling=True)
-        st.download_button("Download HTML Report", data=html, file_name="Weekly_Report.html", mime="text/html")
+        st.download_button("Download HTML Report", data=html, file_name=get_weekly_filename(), mime="text/html")
     else:
         st.error(html)
