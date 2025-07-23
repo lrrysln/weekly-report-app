@@ -123,11 +123,11 @@ with st.form("entry_form"):
     }
 
     st.subheader("Important Dates")
-    tco_date = st.date_input("TCO Date")
-    ops_walk_date = st.date_input("Ops Walk Date")
-    turnover_date = st.date_input("Turnover Date")
-    open_to_train_date = st.date_input("Open to Train Date")
-    store_opening = st.date_input("Store Opening")
+    tco_date = st.date_input("TCO Date", format="%m/%d/%Y")
+    ops_walk_date = st.date_input("Ops Walk Date", format="%m/%d/%Y")
+    turnover_date = st.date_input("Turnover Date", format="%m/%d/%Y")
+    open_to_train_date = st.date_input("Open to Train Date", format="%m/%d/%Y")
+    store_opening = st.date_input("Store Opening", format="%m/%d/%Y")
 
     notes = st.text_area("Notes (Use bullets or dashes)", value="• ", height=200)
 
