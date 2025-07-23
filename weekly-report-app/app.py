@@ -106,6 +106,8 @@ with st.form("entry_form"):
         submitted = st.form_submit_button("Generate Report")
 
 # ----- FORM SUBMISSION -----
+rerun_flag = False
+
 if submitted or submit_entry:
     if password == PASSWORD:
         formatted_data = {
@@ -138,8 +140,12 @@ if submitted or submit_entry:
                 st.download_button("Download HTML Report", f, file_name=html_filename, mime="text/html")
 
             st.success("✅ Report submitted and saved successfully.")
-            st.experimental_rerun()
+            rerun_flag = True
         else:
             st.success("✅ Entry submitted without generating report.")
     else:
         st.error("❌ Incorrect password. Report not generated.")
+
+# ----- SAFE RERUN OUTSIDE FORM CONTEXT -----
+if rerun_flag:
+    st.experimental_rerun()
