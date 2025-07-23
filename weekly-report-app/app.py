@@ -13,7 +13,7 @@ SAVE_DIR.mkdir(exist_ok=True)
 
 # ----- FUNCTIONS -----
 def format_date(d):
-    return d.strftime("%m/%d/%y") if d else ""
+    return d.strftime("%m/%d/%Y") if d else ""
 
 def process_notes(notes):
     lines = notes.strip().split("\n")
@@ -60,7 +60,10 @@ def generate_pdf(data, pdf_path):
     pdf.ln(5)
     pdf.multi_cell(0, 10, txt=f"Notes:\n{data['notes']}")
 
-    pdf.output(pdf_path)
+    try:
+        pdf.output(pdf_path, "F")
+    except UnicodeEncodeError:
+        st.error("Failed to generate PDF due to unsupported characters. Please remove any special characters and try again.")
 
 # ----- FORM LAYOUT -----
 st.title("📝 Weekly Store Report Form")
@@ -109,9 +112,14 @@ with st.form("entry_form"):
     notes_input = st.text_area("Use Enter to create new notes. Bullets will appear automatically.", value="• ", height=200)
 
     password = st.text_input("Enter password to generate report:", type="password")
-    submitted = st.form_submit_button("Generate Report")
 
-if submitted:
+    col1, col2 = st.columns(2)
+    with col1:
+        submit_entry = st.form_submit_button("Submit Entry")
+    with col2:
+        submitted = st.form_submit_button("Generate Report")
+
+if submitted or submit_entry:
     if password == PASSWORD:
         formatted_data = {
             "store_name": store_name,
@@ -129,24 +137,27 @@ if submitted:
 
         html_report = generate_html(formatted_data)
 
-        st.subheader("📄 Report Preview")
-        components.html(html_report, height=600, scrolling=True)
+        if submitted:
+            st.subheader("📄 Report Preview")
+            components.html(html_report, height=600, scrolling=True)
 
-        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        base_filename = f"{formatted_data['store_number']}_{timestamp}"
-        html_filename = f"{base_filename}.html"
-        pdf_filename = f"{base_filename}.pdf"
+            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            base_filename = f"{formatted_data['store_number']}_{timestamp}"
+            html_filename = f"{base_filename}.html"
+            pdf_filename = f"{base_filename}.pdf"
 
-        save_report(html_report, html_filename)
-        generate_pdf(formatted_data, SAVE_DIR / pdf_filename)
+            save_report(html_report, html_filename)
+            generate_pdf(formatted_data, SAVE_DIR / pdf_filename)
 
-        with open(SAVE_DIR / html_filename, "rb") as f:
-            st.download_button("Download HTML Report", f, file_name=html_filename, mime="text/html")
+            with open(SAVE_DIR / html_filename, "rb") as f:
+                st.download_button("Download HTML Report", f, file_name=html_filename, mime="text/html")
 
-        with open(SAVE_DIR / pdf_filename, "rb") as f:
-            st.download_button("Download PDF Report", f, file_name=pdf_filename, mime="application/pdf")
+            with open(SAVE_DIR / pdf_filename, "rb") as f:
+                st.download_button("Download PDF Report", f, file_name=pdf_filename, mime="application/pdf")
 
-        st.success("Report submitted and saved successfully.")
-        st.experimental_rerun()
+            st.success("Report submitted and saved successfully.")
+            st.experimental_rerun()
+        else:
+            st.success("Entry submitted without generating report.")
     else:
         st.error("Incorrect password. Report not generated.")
