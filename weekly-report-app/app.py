@@ -98,8 +98,6 @@ with st.form("entry_form"):
     """, unsafe_allow_html=True)
     notes_input = st.text_area("Use Enter to create new notes. Bullets will appear automatically.", value="• ", height=200)
 
-    password = st.text_input("Enter password to generate report:", type="password")
-
     col1, col2 = st.columns(2)
     with col1:
         submit_entry = st.form_submit_button("Submit Entry")
@@ -107,7 +105,24 @@ with st.form("entry_form"):
         submitted = st.form_submit_button("Generate Report")
 
 # ----- FORM SUBMISSION -----
-if submitted or submit_entry:
+if submit_entry:
+    formatted_data = {
+        "store_name": store_name,
+        "store_number": store_number,
+        "subject": subject,
+        "project_manager": project_manager,
+        "tco_date": format_date(tco_date),
+        "ops_walk_date": format_date(ops_walk_date),
+        "turnover_date": format_date(turnover_date),
+        "open_to_train_date": format_date(open_to_train_date),
+        "store_opening": format_date(store_opening),
+        "store_types": ", ".join(store_types_list),
+        "notes": process_notes(notes_input),
+    }
+    st.success("✅ Entry submitted without generating report.")
+
+if submitted:
+    password = st.text_input("Enter password to generate report:", type="password")
     if password == PASSWORD:
         formatted_data = {
             "store_name": store_name,
@@ -125,22 +140,19 @@ if submitted or submit_entry:
 
         html_report = generate_html(formatted_data)
 
-        if submitted:
-            st.subheader("📄 Report Preview")
-            components.html(html_report, height=600, scrolling=True)
+        st.subheader("📄 Report Preview")
+        components.html(html_report, height=600, scrolling=True)
 
-            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-            base_filename = f"{formatted_data['store_number']}_{timestamp}"
-            html_filename = f"{base_filename}.html"
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        base_filename = f"{formatted_data['store_number']}_{timestamp}"
+        html_filename = f"{base_filename}.html"
 
-            save_report(html_report, html_filename)
+        save_report(html_report, html_filename)
 
-            with open(SAVE_DIR / html_filename, "rb") as f:
-                st.download_button("Download HTML Report", f, file_name=html_filename, mime="text/html")
+        with open(SAVE_DIR / html_filename, "rb") as f:
+            st.download_button("Download HTML Report", f, file_name=html_filename, mime="text/html")
 
-            st.success("✅ Report submitted and saved successfully.")
-            st.stop()
-        else:
-            st.success("✅ Entry submitted without generating report.")
+        st.success("✅ Report submitted and saved successfully.")
+        st.stop()
     else:
         st.error("❌ Incorrect password. Report not generated.")
