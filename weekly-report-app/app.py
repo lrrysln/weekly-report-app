@@ -5,7 +5,7 @@ from datetime import date
 import os
 
 # === CONFIG ===
-EXCEL_PATH = r"C:\Users\<YourName>\OneDrive - RaceTrac Petroleum Inc\EngineeringLeadership\Construction Weekly Updates\Construction Weekly Updates.xlsx"
+EXCEL_PATH = https://racetrac.sharepoint.com/sites/EngineeringLeadership/Shared%20Documents/General/Larry%20Sloan/Construction%20Weekly%20Updates/Construction%20Weekly%20Updates.xlsx
 SHEET_NAME = "Sheet1"
 
 # === WEEK LABEL ===
