@@ -4,7 +4,6 @@ import os
 import pandas as pd
 from pathlib import Path
 import streamlit.components.v1 as components
-from fpdf import FPDF
 
 # ----- CONFIGURATION -----
 PASSWORD = "report2025"
@@ -27,7 +26,7 @@ def save_report(data, filename):
 def generate_html(data):
     return f"""
     <html>
-        <body>
+        <body style='background-color: black; color: red;'>
             <h2>{data['subject']}</h2>
             <p><strong>Store:</strong> {data['store_name']} (#{data['store_number']})</p>
             <p><strong>Project Manager:</strong> {data['project_manager']}</p>
@@ -41,29 +40,6 @@ def generate_html(data):
         </body>
     </html>
     """
-
-def generate_pdf(data, pdf_path):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-
-    pdf.cell(200, 10, txt=data['subject'], ln=True, align="L")
-    pdf.cell(200, 10, txt=f"Store: {data['store_name']} (#{data['store_number']})", ln=True)
-    pdf.cell(200, 10, txt=f"Project Manager: {data['project_manager']}", ln=True)
-    pdf.cell(200, 10, txt=f"TCO Date: {data['tco_date']}", ln=True)
-    pdf.cell(200, 10, txt=f"Ops Walk Date: {data['ops_walk_date']}", ln=True)
-    pdf.cell(200, 10, txt=f"Turnover Date: {data['turnover_date']}", ln=True)
-    pdf.cell(200, 10, txt=f"Open to Train Date: {data['open_to_train_date']}", ln=True)
-    pdf.cell(200, 10, txt=f"Store Opening: {data['store_opening']}", ln=True)
-    pdf.cell(200, 10, txt=f"Store Types: {data['store_types']}", ln=True)
-
-    pdf.ln(5)
-    pdf.multi_cell(0, 10, txt=f"Notes:\n{data['notes']}")
-
-    try:
-        pdf.output(pdf_path, "F")
-    except UnicodeEncodeError:
-        st.error("Failed to generate PDF due to unsupported characters. Please remove any special characters and try again.")
 
 # ----- FORM LAYOUT -----
 st.title("📝 Weekly Store Report Form")
@@ -144,16 +120,11 @@ if submitted or submit_entry:
             timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
             base_filename = f"{formatted_data['store_number']}_{timestamp}"
             html_filename = f"{base_filename}.html"
-            pdf_filename = f"{base_filename}.pdf"
 
             save_report(html_report, html_filename)
-            generate_pdf(formatted_data, SAVE_DIR / pdf_filename)
 
             with open(SAVE_DIR / html_filename, "rb") as f:
                 st.download_button("Download HTML Report", f, file_name=html_filename, mime="text/html")
-
-            with open(SAVE_DIR / pdf_filename, "rb") as f:
-                st.download_button("Download PDF Report", f, file_name=pdf_filename, mime="application/pdf")
 
             st.success("Report submitted and saved successfully.")
             st.experimental_rerun()
