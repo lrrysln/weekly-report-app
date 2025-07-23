@@ -71,18 +71,14 @@ with st.form("entry_form"):
     store_number = st.text_input("Store Number")
 
     st.subheader("Project Details")
-    subject = st.selectbox("Subject", [
-        "New Construction", "EDO Additions", "Phase 1/ Demo - New Construction Sites",
+    subject = st.selectbox("Subject", ["Select Subject", "New Construction", "EDO Additions", "Phase 1/ Demo - New Construction Sites",
         "Remodels", "6k Remodels", "EV Project", "Traditional Special Project",
         "Miscellaneous Items of Note", "Potential Projects",
-        "Complete - Awaiting Post Completion Site Visit", "2025 Completed Projects"
-    ])
+        "Complete - Awaiting Post Completion Site Visit", "2025 Completed Projects"])
 
-    project_manager = st.selectbox("Project Manager", [
-        "Gretchen Sevin", "Angie R", "Tate Godwin", "Tyler Robledo",
+    project_manager = st.selectbox("Project Manager", ["Select Project Manager", "Gretchen Sevin", "Angie R", "Tate Godwin", "Tyler Robledo",
         "Dave Matthews", "Chad Smith", "Jeb C", "Wes M",
-        "Phillip Jeffcoat", "Dj Garland"
-    ])
+        "Phillip Jeffcoat", "Dj Garland"])
 
     st.subheader("Store Types")
     store_types_list = []
@@ -93,11 +89,11 @@ with st.form("entry_form"):
     if st.checkbox("RT Travel Centers"): store_types_list.append("RT Travel Centers")
 
     st.subheader("Important Dates")
-    tco_date = st.date_input("TCO Date")
-    ops_walk_date = st.date_input("Ops Walk Date")
-    turnover_date = st.date_input("Turnover Date")
-    open_to_train_date = st.date_input("Open to Train Date")
-    store_opening = st.date_input("Store Opening")
+    tco_date = st.date_input("Select TCO Date", value=None)
+    ops_walk_date = st.date_input("Select Ops Walk Date", value=None)
+    turnover_date = st.date_input("Select Turnover Date", value=None)
+    open_to_train_date = st.date_input("Select Open to Train Date", value=None)
+    store_opening = st.date_input("Select Store Opening Date", value=None)
 
     st.subheader("Notes")
     custom_css = """
@@ -112,11 +108,10 @@ with st.form("entry_form"):
     st.markdown(custom_css, unsafe_allow_html=True)
     notes_input = st.text_area("Use Enter to create new notes. Bullets will appear automatically.", value="• ", height=200)
 
-    submitted = st.form_submit_button("Submit")
+    password = st.text_input("Enter password to generate report:", type="password")
+    submitted = st.form_submit_button("Generate Report")
 
 if submitted:
-    # Password prompt
-    password = st.text_input("Enter password to generate report:", type="password")
     if password == PASSWORD:
         formatted_data = {
             "store_name": store_name,
@@ -134,11 +129,9 @@ if submitted:
 
         html_report = generate_html(formatted_data)
 
-        # Show HTML preview
         st.subheader("📄 Report Preview")
         components.html(html_report, height=600, scrolling=True)
 
-        # Save HTML to file
         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
         base_filename = f"{formatted_data['store_number']}_{timestamp}"
         html_filename = f"{base_filename}.html"
