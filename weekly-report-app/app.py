@@ -10,7 +10,7 @@ with st.form("weekly_report_form"):
     submitted_by = st.text_input("Your Name")
     project_name = st.text_input("Project Name")
     project_id = st.text_input("Project ID")
-    update_date = st.date_input("Date of Update", format="MM/DD/YY")
+    update_date = st.date_input("Date of Update")
 
     # Key Dates
     st.subheader("Key Construction Dates")
@@ -22,11 +22,17 @@ with st.form("weekly_report_form"):
 
     # General Notes
     st.subheader("Weekly Notes")
-    notes = st.text_area("Add bullet points for site progress, delays, weather, or issues:", placeholder="\n- Framing completed on main structure\n- Waiting on inspection scheduling\n- Rain delayed landscaping work")
+    notes = st.text_area(
+        "Add bullet points for site progress, delays, weather, or issues:",
+        placeholder="- Framing completed on main structure\n- Waiting on inspection scheduling\n- Rain delayed landscaping work"
+    )
 
     # File Uploads
-    uploaded_files = st.file_uploader("Upload relevant documents (PDFs, Images, etc.)", type=None, accept_multiple_files=True)
+    uploaded_files = st.file_uploader(
+        "Upload relevant documents (PDFs, Images, etc.)", type=None, accept_multiple_files=True
+    )
 
+    # Submit Button (MUST be inside the form block)
     submitted = st.form_submit_button("Submit Report")
 
 # Handle Submission
@@ -50,7 +56,7 @@ if submitted:
 
         if notes:
             st.markdown("### 📝 Weekly Notes")
-            bullet_points = notes.split("\n")
+            bullet_points = notes.strip().split("\n")
             for point in bullet_points:
                 if point.strip():
                     st.markdown(f"- {point.strip()}")
@@ -59,5 +65,3 @@ if submitted:
             st.markdown("### 📎 Uploaded Files")
             for file in uploaded_files:
                 st.markdown(f"- {file.name}")
-
-        # Optional: Log the data, send an email, or write to a database/file here
