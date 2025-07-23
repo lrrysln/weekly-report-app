@@ -2,17 +2,18 @@ import streamlit as st
 import datetime
 import os
 import pandas as pd
+import re
 from pathlib import Path
 import streamlit.components.v1 as components
 
 # ----- CONFIGURATION -----
-PASSWORD = "1234"
+PASSWORD = "report2025"
 SAVE_DIR = Path("reports")
 SAVE_DIR.mkdir(exist_ok=True)
 
-# ----- FUNCTIONS -----
+# ----- UTILITY FUNCTIONS -----
 def format_date(d):
-    return d.strftime("%m/%d/%Y") if d else ""
+    return d.strftime("%m/%d/%y") if d else ""
 
 def process_notes(notes):
     lines = notes.strip().split("\n")
@@ -20,28 +21,38 @@ def process_notes(notes):
     return "\n".join(bullet_lines)
 
 def save_report(data, filename):
-    with open(SAVE_DIR / filename, "w") as f:
+    with open(SAVE_DIR / filename, "w", encoding="utf-8") as f:
         f.write(data)
 
 def generate_html(data):
     return f"""
     <html>
-        <body style='background-color: black; color: red;'>
+        <head>
+        <style>
+            body {{ font-family: Arial; padding: 20px; background-color: #fff; color: #333; }}
+            h2 {{ color: #2a7ae2; }}
+            .entry p {{ margin: 5px 0; }}
+        </style>
+        </head>
+        <body>
+            <h1>Weekly Project Report</h1>
             <h2>{data['subject']}</h2>
-            <p><strong>Store:</strong> {data['store_name']} (#{data['store_number']})</p>
-            <p><strong>Project Manager:</strong> {data['project_manager']}</p>
-            <p><strong>TCO Date:</strong> {data['tco_date']}</p>
-            <p><strong>Ops Walk Date:</strong> {data['ops_walk_date']}</p>
-            <p><strong>Turnover Date:</strong> {data['turnover_date']}</p>
-            <p><strong>Open to Train Date:</strong> {data['open_to_train_date']}</p>
-            <p><strong>Store Opening:</strong> {data['store_opening']}</p>
-            <p><strong>Store Types:</strong> {data['store_types']}</p>
-            <p><strong>Notes:</strong><br>{data['notes'].replace(chr(10), '<br>')}</p>
+            <div class='entry'>
+                <p><strong>Store:</strong> {data['store_name']} (#{data['store_number']})</p>
+                <p><strong>Project Manager:</strong> {data['project_manager']}</p>
+                <p><strong>TCO Date:</strong> {data['tco_date']}</p>
+                <p><strong>Ops Walk Date:</strong> {data['ops_walk_date']}</p>
+                <p><strong>Turnover Date:</strong> {data['turnover_date']}</p>
+                <p><strong>Open to Train Date:</strong> {data['open_to_train_date']}</p>
+                <p><strong>Store Opening:</strong> {data['store_opening']}</p>
+                <p><strong>Store Types:</strong> {data['store_types']}</p>
+                <p><strong>Notes:</strong><br>{data['notes'].replace(chr(10), '<br>')}</p>
+            </div>
         </body>
     </html>
     """
 
-# ----- FORM LAYOUT -----
+# ----- STREAMLIT FORM -----
 st.title("📝 Weekly Store Report Form")
 
 with st.form("entry_form"):
@@ -68,14 +79,14 @@ with st.form("entry_form"):
     if st.checkbox("RT Travel Centers"): store_types_list.append("RT Travel Centers")
 
     st.subheader("Important Dates")
-    tco_date = st.date_input("Select TCO Date", value=None)
-    ops_walk_date = st.date_input("Select Ops Walk Date", value=None)
-    turnover_date = st.date_input("Select Turnover Date", value=None)
-    open_to_train_date = st.date_input("Select Open to Train Date", value=None)
-    store_opening = st.date_input("Select Store Opening Date", value=None)
+    tco_date = st.date_input("TCO Date")
+    ops_walk_date = st.date_input("Ops Walk Date")
+    turnover_date = st.date_input("Turnover Date")
+    open_to_train_date = st.date_input("Open to Train Date")
+    store_opening = st.date_input("Store Opening")
 
     st.subheader("Notes")
-    custom_css = """
+    st.markdown("""
     <style>
     textarea {
         font-family: monospace;
@@ -83,8 +94,7 @@ with st.form("entry_form"):
         white-space: pre-wrap;
     }
     </style>
-    """
-    st.markdown(custom_css, unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
     notes_input = st.text_area("Use Enter to create new notes. Bullets will appear automatically.", value="• ", height=200)
 
     password = st.text_input("Enter password to generate report:", type="password")
@@ -95,6 +105,7 @@ with st.form("entry_form"):
     with col2:
         submitted = st.form_submit_button("Generate Report")
 
+# ----- FORM SUBMISSION -----
 if submitted or submit_entry:
     if password == PASSWORD:
         formatted_data = {
@@ -126,9 +137,9 @@ if submitted or submit_entry:
             with open(SAVE_DIR / html_filename, "rb") as f:
                 st.download_button("Download HTML Report", f, file_name=html_filename, mime="text/html")
 
-            st.success("Report submitted and saved successfully.")
+            st.success("✅ Report submitted and saved successfully.")
             st.experimental_rerun()
         else:
-            st.success("Entry submitted without generating report.")
+            st.success("✅ Entry submitted without generating report.")
     else:
-        st.error("Incorrect password. Report not generated.")
+        st.error("❌ Incorrect password. Report not generated.")
