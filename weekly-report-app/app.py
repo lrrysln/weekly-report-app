@@ -1,169 +1,243 @@
 import streamlit as st
 import pandas as pd
-import datetime
-import re
+from datetime import date
+import os
 from pathlib import Path
 
-# Set up Streamlit page
-st.set_page_config(page_title="Weekly Construction Report", layout="centered")
-st.title("📝 Weekly Store Report Form")
+# ---------------- CONFIG ----------------
+USE_TEST_FILE = True  # <-- set to False when ready to use real SharePoint-synced file
 
-# ✅ SharePoint-synced base path
-BASE_PATH = Path(r"C:\Users\lsloan\RaceTrac\Construction and Engineering Leadership - Documents\General\Larry Sloan\Construction Weekly Updates")
+# Real OneDrive-synced path (update when ready to go live)
+REAL_EXCEL_PATH = r"C:\Users\lsloan\RaceTrac\Construction and Engineering Leadership - Documents\General\Larry Sloan\Construction Weekly Updates\Construction Weekly Updates.xlsx"
 
-# 🔧 Helper Functions
-def get_current_week_folder():
-    today = datetime.datetime.now()
-    week_number = today.isocalendar().week
-    week_folder = BASE_PATH / f"Week {week_number} {today.year}"
-    week_folder.mkdir(parents=True, exist_ok=True)
-    return week_folder
+# Local test file
+TEST_EXCEL_PATH = "test_weekly_report.xlsx"
 
-def get_excel_path():
-    folder = get_current_week_folder()
-    week_number = datetime.datetime.now().isocalendar().week
-    year = datetime.datetime.now().year
-    return folder / f"Week {week_number} {year}.xlsx"
+EXCEL_PATH = TEST_EXCEL_PATH if USE_TEST_FILE else REAL_EXCEL_PATH
+SHEET_NAME = "Sheet1"
 
-def save_to_excel(entry_data):
-    excel_path = get_excel_path()
-    new_df = pd.DataFrame([entry_data])
+# Column schema for the Excel log
+COLUMNS = [
+    "Week",
+    "Project Name",
+    "Milestone",
+    "Baseline Date",
+    "Last Week Date",
+    "This Week Date",
+    "Δ Days",
+    "Trend",
+    "# Changes",
+    "Confidence",
+    "Notes",
+]
 
-    if excel_path.exists():
-        existing_df = pd.read_excel(excel_path, engine="openpyxl")
-        combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+
+# ---------------- HELPERS ----------------
+def get_week_label(d: date | None = None) -> str:
+    d = d or date.today()
+    wk = d.isocalendar()[1]
+    return f"Week {wk} {d.year}"
+
+
+def ensure_file():
+    """Create the Excel file with headers if it does not exist."""
+    if not os.path.exists(EXCEL_PATH):
+        df = pd.DataFrame(columns=COLUMNS)
+        df.to_excel(EXCEL_PATH, index=False, sheet_name=SHEET_NAME)
+
+
+def append_row(row_dict: dict):
+    """Append a row to the Excel file."""
+    ensure_file()
+    df = pd.read_excel(EXCEL_PATH, engine="openpyxl")
+    df = pd.concat([df, pd.DataFrame([row_dict])], ignore_index=True)
+    df.to_excel(EXCEL_PATH, index=False, engine="openpyxl")
+
+
+def compute_trend(baseline, last_week, this_week):
+    """
+    baseline/last_week/this_week are pandas Timestamps or NaT.
+    Returns (delta_days, trend_icon).
+    - Δ Days: this_week - baseline
+    - Trend: compare this_week vs last_week
+    """
+    if pd.isna(this_week) or pd.isna(baseline):
+        delta_days = None
     else:
-        combined_df = new_df
+        delta_days = (this_week - baseline).days
 
-    combined_df.to_excel(excel_path, index=False, engine="openpyxl")
-    return excel_path
+    if pd.isna(this_week) or pd.isna(last_week):
+        trend = "❔"
+    elif this_week > last_week:
+        trend = "📉 Slipped"
+    elif this_week < last_week:
+        trend = "📈 Pulled"
+    else:
+        trend = "➖ Held"
 
-def generate_weekly_summary(password):
-    if password != "1234":
-        return None, "❌ Incorrect password."
+    return delta_days, trend
 
-    path = get_excel_path()
-    if not path.exists():
-        return None, "⚠️ No entries submitted this week."
 
-    df = pd.read_excel(path, engine="openpyxl")
+def summarize_history(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build an executive summary rollup from the history log (all weeks, all rows).
+    Summary rows = latest row per (Project Name, Milestone), with baseline + last & this week comparisons.
+    """
     if df.empty:
-        return None, "🚫 No data to summarize."
+        return df
 
-    html = ["<html><head><style>",
-            "body{font-family:Arial;padding:20px}",
-            "h1{text-align:center}",
-            "h2{background:#cce5ff;padding:10px;border-radius:4px}",
-            ".entry{border:1px solid #ccc;padding:10px;margin:10px 0;border-radius:4px;background:#f9f9f9}",
-            "ul{margin:0;padding-left:20px}",
-            ".label{font-weight:bold}",
-            "</style></head><body>",
-            "<h1>Weekly Summary Report</h1>"]
+    # Convert date cols to datetime
+    for col in ["Baseline Date", "Last Week Date", "This Week Date"]:
+        df[col] = pd.to_datetime(df[col], errors="coerce")
 
-    for subject, group in df.groupby("Subject"):
-        html.append(f"<h2>{subject}</h2>")
-        for _, row in group.iterrows():
-            html.append('<div class="entry"><ul>')
-            html.append(f"<li><span class='label'>Store Name:</span> {row.get('Store Name', '')}</li>")
-            html.append(f"<li><span class='label'>Store Number:</span> {row.get('Store Number', '')}</li>")
+    # Sort by Week insertion order (assume file is historical append; keep natural order)
+    # If you want stricter ordering, parse Week column; here we just use row order.
+    df = df.reset_index(drop=True)
 
-            types = [col for col in [
-                "RaceWay EDO Stores", "RT EFC - Traditional", "RT 5.5k EDO Stores",
-                "RT EFC EDO Stores", "RT Travel Centers"] if row.get(col)]
-            if types:
-                html.append("<li><span class='label'>Types:</span><ul>")
-                html += [f"<li>{t}</li>" for t in types]
-                html.append("</ul></li>")
+    # Group by Project + Milestone
+    rows = []
+    for (proj, ms), g in df.groupby(["Project Name", "Milestone"]):
+        g = g.reset_index(drop=True)
 
-            html.append("<li><span class='label'>Dates:</span><ul>")
-            for label in ["TCO Date", "Ops Walk Date", "Turnover Date", "Open to Train Date", "Store Opening"]:
-                try:
-                    val = pd.to_datetime(row.get(label, ''), errors='coerce')
-                    html.append(f"<li><span class='label'>{label}:</span> {val.strftime('%m/%d/%y') if not pd.isna(val) else ''}</li>")
-                except:
-                    html.append(f"<li><span class='label'>{label}:</span> {row.get(label, '')}</li>")
-            html.append("</ul></li>")
+        # Baseline = first non-na baseline found in group
+        baseline = g["Baseline Date"].dropna().iloc[0] if not g["Baseline Date"].dropna().empty else pd.NaT
 
-            notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
-            if notes:
-                html.append("<li><span class='label'>Notes:</span><ul>")
-                html += [f"<li>{n}</li>" for n in notes]
-                html.append("</ul></li>")
+        # Latest row for this group (most recent entry in file)
+        latest = g.iloc[-1]
+        this_week = latest["This Week Date"]
 
-            html.append("</ul></div>")
+        # Last Week: take the most recent prior row (2nd to last) if present
+        if len(g) > 1:
+            last_week = g.iloc[-2]["This Week Date"]
+        else:
+            last_week = pd.NaT
 
-    html.append("</body></html>")
-    return df, "".join(html)
+        delta_days, trend = compute_trend(baseline, last_week, this_week)
 
-def get_weekly_filename():
-    today = datetime.datetime.now()
-    week_num = today.isocalendar().week
-    return f"Week {week_num} {today.year} Report.html"
+        # # Changes = count of distinct This Week Dates in history (excluding NaT)
+        changes = g["This Week Date"].dropna().nunique() - 1 if g["This Week Date"].dropna().nunique() > 0 else 0
+        if changes < 0:
+            changes = 0
 
-# 📝 Streamlit Form
-with st.form("entry_form", clear_on_submit=True):
-    st.subheader("Store Info")
-    store_name = st.text_input("Store Name")
-    store_number = st.text_input("Store Number")
+        rows.append(
+            {
+                "Project Name": proj,
+                "Milestone": ms,
+                "Baseline": baseline.date().strftime("%m/%d/%y") if not pd.isna(baseline) else "",
+                "Last Week": last_week.date().strftime("%m/%d/%y") if not pd.isna(last_week) else "",
+                "This Week": this_week.date().strftime("%m/%d/%y") if not pd.isna(this_week) else "",
+                "Δ Days": delta_days if delta_days is not None else "",
+                "Trend": trend,
+                "# Changes": changes,
+                "Latest Confidence": latest.get("Confidence", ""),
+                "Latest Notes": latest.get("Notes", ""),
+            }
+        )
 
-    st.subheader("Project Details")
-    subject = st.selectbox("Subject", [
-        "New Construction", "EDO Additions", "Phase 1/ Demo - New Construction Sites",
-        "Remodels", "6k Remodels", "EV Project", "Traditional Special Project",
-        "Miscellaneous Items of Note", "Potential Projects",
-        "Complete - Awaiting Post Completion Site Visit", "2025 Completed Projects"
-    ])
+    return pd.DataFrame(rows)
 
-    st.subheader("Store Types")
-    types = {
-        "RaceWay EDO Stores": st.checkbox("RaceWay EDO Stores"),
-        "RT EFC - Traditional": st.checkbox("RT EFC - Traditional"),
-        "RT 5.5k EDO Stores": st.checkbox("RT 5.5k EDO Stores"),
-        "RT EFC EDO Stores": st.checkbox("RT EFC EDO Stores"),
-        "RT Travel Centers": st.checkbox("RT Travel Centers")
+
+# ---------------- UI ----------------
+st.title("📊 Milestone History Logger (Test Mode)" if USE_TEST_FILE else "📊 Milestone History Logger")
+
+if USE_TEST_FILE:
+    st.info("Test mode is ON. Data will be saved to a local file: `test_weekly_report.xlsx`.")
+
+week_label = get_week_label()
+
+with st.form("milestone_form", clear_on_submit=True):
+    st.subheader(f"Submit Milestone Update ({week_label})")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        project_name = st.text_input("Project Name")
+    with col2:
+        milestone = st.selectbox(
+            "Milestone",
+            [
+                "Store Opening",
+                "TCO / CO",
+                "POD Walk",
+                "Turnover",
+                "Open to Train",
+                "Permit",
+                "Other",
+            ],
+        )
+
+    col3, col4, col5 = st.columns(3)
+    with col3:
+        baseline_date = st.date_input("Baseline Date")
+    with col4:
+        last_week_date = st.date_input("Last Week Date")
+    with col5:
+        this_week_date = st.date_input("This Week Date")
+
+    confidence = st.selectbox("Confidence", ["Green", "Yellow", "Red", "N/A"], index=3)
+
+    notes = st.text_area("Notes (each bullet on new line)", height=120, placeholder="- Equipment delay\n- Weather hold")
+
+    # Buttons side-by-side
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        submit_btn = st.form_submit_button("Submit")
+    with c2:
+        gen_btn = st.form_submit_button("Generate Report")
+
+# ---- HANDLE SUBMIT ----
+if submit_btn:
+    row_dict = {
+        "Week": week_label,
+        "Project Name": project_name,
+        "Milestone": milestone,
+        "Baseline Date": baseline_date.strftime("%Y-%m-%d"),
+        "Last Week Date": last_week_date.strftime("%Y-%m-%d"),
+        "This Week Date": this_week_date.strftime("%Y-%m-%d"),
+        # We'll calculate Δ/Trend/#Changes when generating the report; store blanks in raw log
+        "Δ Days": "",
+        "Trend": "",
+        "# Changes": "",
+        "Confidence": confidence,
+        "Notes": notes.strip(),
     }
+    try:
+        append_row(row_dict)
+        st.success("✅ Entry logged.")
+    except Exception as e:
+        st.error(f"❌ Failed to log entry: {e}")
 
-    st.subheader("Important Dates (MM/DD/YY)")
-    tco_date = st.date_input("TCO Date")
-    ops_walk_date = st.date_input("Ops Walk Date")
-    turnover_date = st.date_input("Turnover Date")
-    open_to_train_date = st.date_input("Open to Train Date")
-    store_opening = st.date_input("Store Opening")
+# ---- HANDLE GENERATE REPORT ----
+if gen_btn:
+    try:
+        ensure_file()
+        raw_df = pd.read_excel(EXCEL_PATH, engine="openpyxl")
 
-    st.subheader("Notes")
-    notes = st.text_area("Add Notes (Press enter for each bullet)", value="• ", height=200)
+        if raw_df.empty:
+            st.warning("No data logged yet.")
+        else:
+            summary_df = summarize_history(raw_df)
 
-    submitted = st.form_submit_button("Submit")
+            st.subheader("Executive Summary")
+            st.dataframe(summary_df, use_container_width=True)
 
-    if submitted:
-        entry = {
-            "Store Name": store_name,
-            "Store Number": store_number,
-            "Subject": subject,
-            "TCO Date": tco_date.strftime("%m/%d/%y"),
-            "Ops Walk Date": ops_walk_date.strftime("%m/%d/%y"),
-            "Turnover Date": turnover_date.strftime("%m/%d/%y"),
-            "Open to Train Date": open_to_train_date.strftime("%m/%d/%y"),
-            "Store Opening": store_opening.strftime("%m/%d/%y"),
-            "Notes": notes
-        }
-        entry.update(types)
+            # Quick metrics
+            slipped = (summary_df["Trend"].str.contains("Slipped")).sum()
+            pulled = (summary_df["Trend"].str.contains("Pulled")).sum()
+            held = (summary_df["Trend"].str.contains("Held")).sum()
 
-        try:
-            saved_path = save_to_excel(entry)
-            st.success("✅ Entry saved successfully!")
-            st.info(f"📁 Saved to: `{saved_path}`")
-        except Exception as e:
-            st.error(f"❌ Failed to save entry: {e}")
+            m1, m2, m3 = st.columns(3)
+            m1.metric("📉 Slipped", slipped)
+            m2.metric("📈 Pulled In", pulled)
+            m3.metric("➖ Held", held)
 
-# 🔐 Report Generation Section
-st.subheader("🔐 Generate Weekly Report")
-password = st.text_input("Enter Password to Generate Report", type="password")
-if st.button("Generate Report"):
-    df, html = generate_weekly_summary(password)
-    if df is not None:
-        st.success("✅ Report generated successfully!")
-        st.components.v1.html(html, height=800, scrolling=True)
-        st.download_button("Download HTML Report", data=html, file_name=get_weekly_filename(), mime="text/html")
-    else:
-        st.error(html)
+            # Download summary
+            csv_data = summary_df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "Download Summary CSV",
+                data=csv_data,
+                file_name=f"{week_label}_milestone_summary.csv",
+                mime="text/csv",
+            )
+
+    except Exception as e:
+        st.error(f"❌ Failed to generate report: {e}")
