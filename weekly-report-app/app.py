@@ -1,67 +1,29 @@
 import streamlit as st
 from datetime import datetime
 
-# Page config
-st.set_page_config(page_title="Weekly Construction Report", layout="centered")
-st.title("Weekly Site Update Submission")
+st.title("Weekly Report Submission")
 
-# Form Start
-with st.form("weekly_report_form"):
-    submitted_by = st.text_input("Your Name")
-    project_name = st.text_input("Project Name")
-    project_id = st.text_input("Project ID")
+with st.form("weekly_form"):
     update_date = st.date_input("Date of Update")
+    prototype = st.selectbox("Prototype", ["6K Remodel", "10K New Build", "20K New Build"])
+    site = st.text_input("Site Name")
+    cpm = st.text_input("CPM")
+    start_date = st.date_input("Construction Start")
+    tco = st.date_input("TCO Date")
+    turnover = st.date_input("Turnover Date")
+    notes = st.text_area("Notes (use bullets for updates)")
 
-    # Key Dates
-    st.subheader("Key Construction Dates")
-    permit_date = st.date_input("Permit Received")
-    mobilization_date = st.date_input("Mobilization Start")
-    concrete_date = st.date_input("Concrete Pour Date")
-    tco_date = st.date_input("TCO Date")
-    turnover_date = st.date_input("Turnover to Ops")
+    submitted = st.form_submit_button("Submit")
 
-    # General Notes
-    st.subheader("Weekly Notes")
-    notes = st.text_area(
-        "Add bullet points for site progress, delays, weather, or issues:",
-        placeholder="- Framing completed on main structure\n- Waiting on inspection scheduling\n- Rain delayed landscaping work"
-    )
-
-    # File Uploads
-    uploaded_files = st.file_uploader(
-        "Upload relevant documents (PDFs, Images, etc.)", type=None, accept_multiple_files=True
-    )
-
-    # Submit Button (MUST be inside the form block)
-    submitted = st.form_submit_button("Submit Report")
-
-# Handle Submission
 if submitted:
-    if not submitted_by or not project_name or not project_id:
-        st.warning("Please complete all required fields.")
-    else:
-        st.success(f"✅ Weekly report submitted for project: {project_name}")
-
-        st.markdown("---")
-        st.markdown(f"**Submitted by:** {submitted_by}")
-        st.markdown(f"**Project:** {project_name} ({project_id})")
-        st.markdown(f"**Date:** {update_date.strftime('%m/%d/%y')}")
-
-        st.markdown("### 📅 Key Dates")
-        st.markdown(f"- Permit Received: {permit_date.strftime('%m/%d/%y')}")
-        st.markdown(f"- Mobilization Start: {mobilization_date.strftime('%m/%d/%y')}")
-        st.markdown(f"- Concrete Pour: {concrete_date.strftime('%m/%d/%y')}")
-        st.markdown(f"- TCO Date: {tco_date.strftime('%m/%d/%y')}")
-        st.markdown(f"- Turnover: {turnover_date.strftime('%m/%d/%y')}")
-
-        if notes:
-            st.markdown("### 📝 Weekly Notes")
-            bullet_points = notes.strip().split("\n")
-            for point in bullet_points:
-                if point.strip():
-                    st.markdown(f"- {point.strip()}")
-
-        if uploaded_files:
-            st.markdown("### 📎 Uploaded Files")
-            for file in uploaded_files:
-                st.markdown(f"- {file.name}")
+    st.success("✅ Weekly update submitted successfully!")
+    st.write("**Date of Update:**", update_date.strftime('%m/%d/%y'))
+    st.write("**Prototype:**", prototype)
+    st.write("**Site:**", site)
+    st.write("**CPM:**", cpm)
+    st.write("**Start Date:**", start_date.strftime('%m/%d/%y'))
+    st.write("**TCO:**", tco.strftime('%m/%d/%y'))
+    st.write("**Turnover:**", turnover.strftime('%m/%d/%y'))
+    st.write("**Notes:**")
+    for line in notes.split("\n"):
+        st.write("-", line.strip())
