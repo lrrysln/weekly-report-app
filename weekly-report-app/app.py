@@ -1,106 +1,149 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-from textblob import TextBlob
-from datetime import datetime
+import datetime
+import re
+import os
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+import tempfile
 
-# --- Session State for dynamic list ---
-if "projects" not in st.session_state:
-    st.session_state.projects = [
-        {"Project": "Falcon", "PM Note": "Electrical delay on Floor 2 due to missing conduit shipment.", "Milestone_Baseline": "2025-08-15", "Milestone_Current": "2025-08-24", "Changes": 2, "Submitted": True},
-        {"Project": "Atlas", "PM Note": "Permit finally approved, all systems go.", "Milestone_Baseline": "2025-08-10", "Milestone_Current": "2025-08-10", "Changes": 0, "Submitted": True},
-        {"Project": "Helix", "PM Note": "Same HVAC issue persists. No resolution yet.", "Milestone_Baseline": "2025-07-25", "Milestone_Current": "2025-07-21", "Changes": 2, "Submitted": True},
-        {"Project": "Zenith", "PM Note": "No issues this week, things are on schedule.", "Milestone_Baseline": "2025-08-01", "Milestone_Current": "2025-08-05", "Changes": 2, "Submitted": True},
-        {"Project": "Nova", "PM Note": "Budget overrun due to unexpected design change.", "Milestone_Baseline": "2025-08-05", "Milestone_Current": "2025-08-04", "Changes": 1, "Submitted": True}
-    ]
-    st.session_state.opened_projects = []
+# --- CONFIG ---
+SPREADSHEET_NAME = "Construction_Weekly_Updates"
+FORM_SHEET_NAME = "Form_Entries"
+FOLDER_NAME = "ConstructionReports"
+PASSWORD = "1234"
 
-# --- Add New Project ---
-st.sidebar.markdown("## ➕ Add New Job")
-with st.sidebar.form("add_job"):
-    name = st.text_input("Project Name")
-    baseline = st.date_input("Baseline Milestone Date")
-    note = st.text_area("Initial PM Note")
-    submitted = st.form_submit_button("Add Job")
-    if submitted and name and baseline:
-        st.session_state.projects.append({
-            "Project": name,
-            "PM Note": note,
-            "Milestone_Baseline": str(baseline),
-            "Milestone_Current": str(baseline),
-            "Changes": 0,
-            "Submitted": True
-        })
-        st.success(f"Added {name} to active jobs.")
+# --- GOOGLE AUTH ---
+@st.cache_resource
+def get_gsheet_service():
+    creds = service_account.Credentials.from_service_account_file(
+        "credentials.json",
+        scopes=["https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"]
+    )
+    sheet_service = build("sheets", "v4", credentials=creds)
+    drive_service = build("drive", "v3", credentials=creds)
+    return sheet_service, drive_service
 
-# --- DataFrame Build ---
-df = pd.DataFrame(st.session_state.projects)
-df["Milestone_Baseline"] = pd.to_datetime(df["Milestone_Baseline"])
-df["Milestone_Current"] = pd.to_datetime(df["Milestone_Current"])
-df["Delta_Days"] = (df["Milestone_Current"] - df["Milestone_Baseline"]).dt.days
-df["Trend"] = df["Delta_Days"].apply(lambda x: "📉 Slipped" if x > 0 else "📈 Pulled In" if x < 0 else "➖ Held")
+sheet_service, drive_service = get_gsheet_service()
 
-# --- Flagging System ---
-critical_keywords = ["delay", "missing", "permit", "issue", "overrun", "claim", "inspection", "behind", "lean"]
-def flag_note(note):
-    if any(word in note.lower() for word in critical_keywords):
-        return "🚨 Critical"
-    elif TextBlob(note).sentiment.polarity < -0.2:
-        return "⚠️ Watch"
-    else:
-        return "✅ Good"
-df["Flag"] = df["PM Note"].apply(flag_note)
+# --- FIND / CREATE SPREADSHEET ---
+@st.cache_resource
+def get_or_create_spreadsheet():
+    results = drive_service.files().list(q=f"name='{SPREADSHEET_NAME}' and mimeType='application/vnd.google-apps.spreadsheet'", fields="files(id)").execute()
+    files = results.get("files", [])
+    if files:
+        return files[0]["id"]
+    file_metadata = {
+        "name": SPREADSHEET_NAME,
+        "mimeType": "application/vnd.google-apps.spreadsheet"
+    }
+    file = drive_service.files().create(body=file_metadata).execute()
+    return file["id"]
 
-# --- Note Repetition + Risk ---
-df["Stale Issue"] = df["PM Note"].apply(lambda n: any(w in n.lower() for w in ["same", "persists", "repeated"]))
-df["Note Quality"] = df["PM Note"].apply(lambda n: "Low" if len(n.split()) < 5 else "High")
+spreadsheet_id = get_or_create_spreadsheet()
 
-# --- Store Completion Check ---
-st.markdown("### ✅ Mark Stores as Opened")
-for i, row in df.iterrows():
-    if row["Project"] not in st.session_state.opened_projects:
-        if st.checkbox(f"Mark {row['Project']} as opened", key=f"open_{i}"):
-            st.session_state.opened_projects.append(row["Project"])
-df = df[~df["Project"].isin(st.session_state.opened_projects)]
+# --- FORM SECTION ---
+st.title("📋 Construction Weekly Report Submission")
 
-# --- PM Tracking Simulation ---
-total_pms = 10
-submitted_count = df["Submitted"].sum()
-pending = total_pms - submitted_count
-st.info(f"**PM Notes Submitted:** {submitted_count}/{total_pms} — Waiting on {pending}")
+with st.form("weekly_form"):
+    store = st.text_input("Store Name or Job #", "")
+    pm = st.text_input("Project Manager", "")
+    prototype = st.selectbox("Prototype", ["6K", "9K", "12K", "Other"])
+    cpm = st.text_input("CPM", "")
+    start = st.date_input("Start Date")
+    tco = st.date_input("TCO Date")
+    turnover = st.date_input("Turnover Date")
+    notes_input = st.text_area("Weekly Notes (each line becomes a bullet point)")
 
-# --- Title + Summary ---
-st.title("Project Risk & Schedule Summary")
-st.subheader(f"Weekly Snapshot — {datetime.today().strftime('%B %d, %Y')}")
+    submitted = st.form_submit_button("Submit Report")
 
-# --- Legend ---
-st.markdown("""
-**Legend:**
-- 🚨 Critical = keyword or major issue
-- ⚠️ Watch = negative tone or weak note
-- ✅ Good = no immediate concern
-- 🔁 Stale = repeated issues
-- 📉 Slipped = delayed milestone
-- 📈 Pulled In = accelerated
-- ➖ Held = on time
-""")
+if submitted:
+    # Format bullets
+    notes_cleaned = "\n".join(
+        f"- {re.sub(r'^[\s•\-–●]+', '', line)}"
+        for line in notes_input.splitlines()
+        if line.strip()
+    )
 
-# --- Plot Trends ---
-trend_counts = df["Trend"].value_counts().reset_index()
-trend_counts.columns = ["Trend", "Count"]
-fig = px.bar(trend_counts, x="Trend", y="Count", color="Trend", title="Milestone Trends", color_discrete_map={
-    "📉 Slipped": "red",
-    "📈 Pulled In": "green",
-    "➖ Held": "blue"
-})
-st.plotly_chart(fig, use_container_width=True)
+    today = datetime.date.today()
+    year_week = f"{today.year} Week {today.isocalendar()[1]}"
+    submission = [year_week, store, pm, prototype, cpm,
+                  start.strftime("%m/%d/%y"), tco.strftime("%m/%d/%y"),
+                  turnover.strftime("%m/%d/%y"), notes_cleaned]
 
-# --- Sparkline Stability Score ---
-df["Stability Score"] = df["Changes"].apply(lambda x: "High Risk" if x >= 3 else "Moderate" if x == 2 else "Stable")
-st.markdown("### 🚦 Stability Score by Project")
-st.dataframe(df[["Project", "Stability Score", "Changes", "Delta_Days", "Trend", "Flag", "Stale Issue", "Note Quality", "PM Note"]])
+    # Save to Google Sheet (form tab)
+    sheet_service.spreadsheets().values().append(
+        spreadsheetId=spreadsheet_id,
+        range=f"{FORM_SHEET_NAME}!A1",
+        valueInputOption="USER_ENTERED",
+        body={"values": [submission]}
+    ).execute()
 
-# --- Download CSV ---
-st.markdown("### 📥 Export CSV")
-csv = df.to_csv(index=False).encode("utf-8")
-st.download_button("Download Report", data=csv, file_name="weekly_project_report.csv", mime="text/csv")
+    st.success("✅ Submission saved successfully!")
+
+    # Save HTML report to Drive
+    html_report = f"""
+    <h2>Weekly Report – {store}</h2>
+    <ul>
+        <li><strong>PM:</strong> {pm}</li>
+        <li><strong>Prototype:</strong> {prototype}</li>
+        <li><strong>CPM:</strong> {cpm}</li>
+        <li><strong>Start:</strong> {start.strftime("%m/%d/%y")}</li>
+        <li><strong>TCO:</strong> {tco.strftime("%m/%d/%y")}</li>
+        <li><strong>Turnover:</strong> {turnover.strftime("%m/%d/%y")}</li>
+    </ul>
+    <p><strong>Notes:</strong></p>
+    <ul>
+        {''.join(f"<li>{line[2:]}</li>" for line in notes_cleaned.splitlines())}
+    </ul>
+    """
+
+    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".html") as tmp:
+        tmp.write(html_report)
+        tmp_path = tmp.name
+
+    media = MediaFileUpload(tmp_path, mimetype="text/html")
+    drive_service.files().create(
+        body={"name": f"{store}_Report_{year_week}.html"},
+        media_body=media
+    ).execute()
+
+    os.unlink(tmp_path)
+
+# --- VIEW REPORT (Password-Protected) ---
+st.divider()
+st.subheader("🔐 View Reports")
+
+if st.button("View Report"):
+    with st.expander("Enter Password"):
+        pwd = st.text_input("Password", type="password")
+        if pwd == PASSWORD:
+            st.success("Access granted.")
+
+            rows = sheet_service.spreadsheets().values().get(
+                spreadsheetId=spreadsheet_id,
+                range=f"{FORM_SHEET_NAME}!A2:I"
+            ).execute().get("values", [])
+
+            if rows:
+                df = pd.DataFrame(rows, columns=["YearWeek", "Store", "PM", "Prototype", "CPM", "Start", "TCO", "Turnover", "Notes"])
+                st.dataframe(df)
+
+                # Display latest HTML
+                last = df.iloc[-1]
+                last_html = f"""
+                <h3>Latest Report – {last['Store']}</h3>
+                <p><strong>PM:</strong> {last['PM']}</p>
+                <p><strong>Notes:</strong></p>
+                <ul>
+                {''.join(f"<li>{line[2:]}</li>" for line in last['Notes'].splitlines())}
+                </ul>
+                """
+                st.markdown(last_html, unsafe_allow_html=True)
+                st.download_button("⬇️ Download Last Report (HTML)", last_html, file_name="Weekly_Report.html", mime="text/html")
+            else:
+                st.warning("No reports available.")
+        else:
+            st.error("Incorrect password.")
