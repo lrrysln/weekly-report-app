@@ -2,12 +2,25 @@ import streamlit as st
 from datetime import datetime
 from google.oauth2.service_account import Credentials
 import gspread
+import streamlit as st
+from datetime import datetime
+from google.oauth2.service_account import Credentials
+import json
 
 # --- Google Sheets Auth ---
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets",
-          "https://www.googleapis.com/auth/drive"]
-creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
+
+# Load credentials from Streamlit secrets
+service_account_info = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
 client = gspread.authorize(creds)
+
+# Open the Google Sheet
+sheet = client.open("My Weekly Report Sheet").worksheet("Form Submissions")
+
 
 # Open the Google Sheet
 sheet = client.open("My Weekly Report Sheet").worksheet("Form Submissions")
