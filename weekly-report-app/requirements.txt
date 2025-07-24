@@ -4,3 +4,6 @@ openpyxl
 fpdf
 plotly
 textblob
+gspread
+google-auth
+google-auth-oauthlib
