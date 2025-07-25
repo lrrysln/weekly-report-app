@@ -1,58 +1,42 @@
-from google.oauth2.service_account import Credentials
-import gspread
-import streamlit as st
+from flask import Flask, request, jsonify
+import pandas as pd
 from datetime import datetime
+import re
 
-# --- Google Sheets Auth ---
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-creds = Credentials.from_service_account_info(st.secrets["GOOGLE_CREDENTIALS"], scopes=SCOPES)
-client = gspread.authorize(creds)
+app = Flask(__name__)
 
-# Open the Google Sheet
-sheet = client.open("My Weekly Report Sheet").worksheet("Form Submissions")
+@app.route('/')
+def health_check():
+    return "✅ Report Generator Running"
 
-# --- Streamlit App ---
-st.set_page_config(page_title="Weekly Report", layout="centered")
-st.title("📋 Weekly Construction Report")
+@app.route('/generate-report', methods=['POST'])
+def generate_report():
+    data = request.json
+    df = pd.DataFrame(data)
 
-# --- Password Gate ---
-password = st.text_input("Enter password to unlock form", type="password")
-if password != "yourpassword":
-    st.warning("Enter valid password to continue.")
-    st.stop()
+    html = ["<html><head><style>"]
+    html.append("body{font-family:Arial;padding:20px}")
+    html.append("h1{text-align:center}")
+    html.append(".entry{border:1px solid #ccc;padding:10px;margin:10px 0;border-radius:4px;background:#f9f9f9}")
+    html.append("</style></head><body>")
+    html.append("<h1>Weekly Summary Report</h1>")
 
-# --- Form Inputs ---
-with st.form("weekly_report_form"):
-    name = st.text_input("Your Name")
-    date = st.date_input("Date", value=datetime.today())
-    notes = st.text_area("Weekly Notes (Each bullet on a new line)", height=200)
-    submitted = st.form_submit_button("Submit Report")
+    for subject, group in df.groupby("Subject"):
+        html.append(f"<h2>{subject}</h2>")
+        for _, row in group.iterrows():
+            html.append('<div class="entry"><ul>')
+            html.append(f"<li><strong>Store Name:</strong> {row.get('Store Name', '')}</li>")
+            html.append(f"<li><strong>Store Number:</strong> {row.get('Store Number', '')}</li>")
+            html.append("<li><strong>Dates:</strong><ul>")
+            for date_col in ["TCO Date", "Ops Walk Date", "Turnover Date", "Open to Train Date", "Store Opening"]:
+                html.append(f"<li>{date_col}: {row.get(date_col, '')}</li>")
+            html.append("</ul></li>")
+            html.append("<li><strong>Notes:</strong><ul>")
+            notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
+            html += [f"<li>{n}</li>" for n in notes]
+            html.append("</ul></li>")
+            html.append("</ul></div>")
 
-# --- On Submit ---
-if submitted:
-    bullet_notes = "\n".join([f"- {line.strip()}" for line in notes.split("\n") if line.strip()])
+    html.append("</body></html>")
+    return jsonify({"report_html": "".join(html)})
 
-    sheet.append_row([
-        name,
-        date.strftime("%m/%d/%y"),
-        bullet_notes
-    ])
-
-    html_report = f"""
-    <div style="font-family:Arial;padding:10px">
-        <h2>Weekly Report</h2>
-        <p><strong>Name:</strong> {name}</p>
-        <p><strong>Date:</strong> {date.strftime("%m/%d/%y")}</p>
-        <p><strong>Notes:</strong></p>
-        <ul>
-            {''.join([f'<li>{line.strip()}</li>' for line in notes.splitlines() if line.strip()])}
-        </ul>
-    </div>
-    """
-
-    st.success("✅ Report submitted successfully!")
-    st.markdown("---")
-    st.markdown("### 📄 HTML Preview")
-    st.components.v1.html(html_report, height=400, scrolling=True)
-
-    st.experimental_rerun()
