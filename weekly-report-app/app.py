@@ -5,6 +5,28 @@ import datetime
 import re
 from pathlib import Path
 
+
+import gspread
+from google.oauth2.service_account import Credentials
+import pandas as pd
+
+# Auth
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = Credentials.from_service_account_file("credentials.json", scopes=scope)
+client = gspread.authorize(creds)
+
+# Open Google Sheet
+sheet = client.open("Weekly Construction Updates").sheet1
+
+# Get data
+data = sheet.get_all_records()
+df = pd.DataFrame(data)
+
+# Filter by Week
+current_week = pd.Timestamp.today().isocalendar().week
+df_this_week = df[df['Week'] == f"{pd.Timestamp.today().year} Week {current_week}"]
+
+
 # Paths
 DOWNLOADS = Path.home() / "Downloads"
 
