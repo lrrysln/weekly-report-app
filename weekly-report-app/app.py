@@ -8,7 +8,12 @@ import streamlit as st
 # --- Auth ---
 CREDENTIAL_PATH = "/content/drive/My Drive/gspread_credentials/creds.json"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-creds = Credentials.from_service_account_file(CREDENTIAL_PATH, scopes=SCOPES)
+
+import streamlit as st
+import json
+from google.oauth2.service_account import Credentials
+service_account_info = json.loads(st.secrets["gcp_service_account"].to_json())
+creds = Credentials.from_service_account_info(service_account_info)
 client = gspread.authorize(creds)
 
 # --- Load Data from Google Sheet ---
