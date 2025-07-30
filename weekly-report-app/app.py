@@ -1,106 +1,88 @@
 import streamlit as st
 import pandas as pd
-import base64
-import io
-from datetime import datetime, date
 import matplotlib.pyplot as plt
-import matplotlib
-matplotlib.use('Agg')
+import base64
+from io import BytesIO
+from datetime import datetime, date
+from google.oauth2.service_account import Credentials
+import gspread
 
-st.set_page_config(layout="wide")
-st.title("2025 Week: 31 Weekly Summary Report")
+# Google Sheets credentials and client setup
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
+client = gspread.authorize(creds)
+sh = client.open("Construction Weekly Updates")
 
-# --- File uploader ---
-uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx"])
+# Get current week and year
+current_week = date.today().isocalendar()[1]
+current_year = date.today().year
 
-if uploaded_file:
-    df = pd.read_excel(uploaded_file)
+# Load data from Google Sheets
+def load_data():
+    worksheet = sh.get_worksheet(0)
+    data = worksheet.get_all_records()
+    return pd.DataFrame(data)
 
-    # --- Capitalize first letter of each word in 'Store Name' column ---
-    if 'Store Name' in df.columns:
-        df['Store Name'] = df['Store Name'].str.title()
+def generate_report(df):
+    trend_map = {
+        "pulled in": "🟢 Pulled In",
+        "pushed": "🔴 Pushed",
+        "held": "🟡 Held",
+        "baseline": "⚪ Baseline"
+    }
 
-    # --- Format date columns ---
-    date_fields = ['CPM Date', 'Start Date', 'TCO Date', 'Turnover Date']
-    for field in date_fields:
-        if field in df.columns:
-            df[field] = pd.to_datetime(df[field], errors='coerce').dt.strftime('%m/%d')
+    summary_df = df.copy()
+    summary_df['Trend'] = df.index.map(trend_map)
+    trend_counts = summary_df['Trend'].value_counts().reindex(['🟢 Pulled In', '🔴 Pushed', '🟡 Held', '⚪ Baseline'], fill_value=0)
 
-    # --- Trend logic ---
-    for field in date_fields:
-        baseline_col = f'Baseline {field}'
-        if baseline_col in df.columns:
-            df[baseline_col] = pd.to_datetime(df[baseline_col], errors='coerce').dt.strftime('%m/%d')
-            df[field + ' Trend'] = df.apply(
-                lambda row: 'baseline' if row[field] == row[baseline_col] else (
-                    'pulled in' if pd.to_datetime(row[field], errors='coerce') < pd.to_datetime(row[baseline_col], errors='coerce') else (
-                        'pushed' if pd.to_datetime(row[field], errors='coerce') > pd.to_datetime(row[baseline_col], errors='coerce') else 'held'
-                    )
-                ), axis=1
-            )
+    # Plotting
+    fig, ax = plt.subplots()
+    trend_counts.plot(kind='bar', ax=ax, color=["green", "red", "gold", "grey"])
+    plt.title("Trend Overview")
+    plt.xlabel("Trend")
+    plt.ylabel("Count")
+    plt.tight_layout()
 
-    # --- Summary section ---
-    summary_html = "<h2 style='text-align:center;'>Executive Summary</h2><ul>"
-    trend_counts = {"pulled in": 0, "pushed": 0, "held": 0, "baseline": 0}
+    buffer = BytesIO()
+    plt.savefig(buffer, format='png')
+    buffer.seek(0)
+    img_base64 = base64.b64encode(buffer.read()).decode('utf-8')
 
-    for field in date_fields:
-        trend_col = field + ' Trend'
-        if trend_col in df.columns:
-            counts = df[trend_col].value_counts().to_dict()
-            for key in trend_counts:
-                trend_counts[key] += counts.get(key, 0)
+    # Report HTML
+    html = [f"<h1>{current_year} Week: {current_week} Weekly Summary Report</h1>"]
+    html.append(f'<img src="data:image/png;base64,{img_base64}" style="max-width:600px; display:block; margin:auto;">')
 
-    for trend, count in trend_counts.items():
-        color = {'pulled in': 'green', 'pushed': 'red', 'held': 'orange', 'baseline': 'gray'}[trend]
-        summary_html += f"<li><b style='color:{color};'>{trend.title()}</b>: {count}</li>"
-    summary_html += "</ul>"
+    group_col = 'Subject'
+    date_fields = ["CPM", "Start", "TCO", "Turnover"]
 
-    # --- Grouped notes display ---
-    group_col = 'Subject' if 'Subject' in df.columns else df.columns[0]
-    grouped = df.groupby(group_col)
-
-    html = [summary_html, "<hr>"]
-    for group_name, group_df in grouped:
-        html.append(f"<h3 style='margin-top:20px;'>{group_name}</h3><ul>")
+    for group_name, group_df in df.groupby(group_col):
+        html.append(f"<h3>{group_name}</h3><ul>")
         for _, row in group_df.iterrows():
-            store_name = row.get('Store Name', 'N/A')
-            html.append(f"<li><b>{store_name}</b><ul>")
+            html.append("<li><ul>")
             for field in date_fields:
-                date_val = row.get(field, '')
-                baseline_val = row.get(f'Baseline {field}', '')
-                trend = row.get(field + ' Trend', 'unknown')
-                if pd.notna(date_val):
-                    label = f"<span style='color:red; font-weight:bold;'>Baseline</span> " if date_val == baseline_val else ""
-                    html.append(f"<li>{field}: {label}{date_val} ({trend})</li>")
-            notes = str(row.get('Notes', '')).strip()
-            if notes:
-                note_lines = notes.split('\n')
-                html.append("<li>Notes:<ul>")
-                for line in note_lines:
-                    html.append(f"<li>{line}</li>")
-                html.append("</ul></li>")
+                val = row.get(field)
+                if val:
+                    date_str = datetime.strptime(val, "%Y-%m-%d").strftime("%m/%d") if isinstance(val, str) else val.strftime("%m/%d")
+                    if row.get(f"Baseline_{field}") == val:
+                        html.append(f"<li><b style='color:red;'>Baseline</b>: {field} - {date_str}</li>")
+                    else:
+                        html.append(f"<li>{field}: {date_str}</li>")
+            note = row.get("Notes", "").strip()
+            if note:
+                bullets = ''.join([f"<li>{line.strip()}</li>" for line in note.split('\n') if line.strip()])
+                html.append(f"<li><strong>Notes:</strong><ul>{bullets}</ul></li>")
             html.append("</ul></li>")
         html.append("</ul>")
 
-    report_html = "".join(html)
+    return "\n".join(html)
+
+# Streamlit app
+st.set_page_config(layout="wide")
+st.title("Weekly Construction Report")
+
+df = load_data()
+if not df.empty:
+    report_html = generate_report(df)
     st.markdown(report_html, unsafe_allow_html=True)
-
-    # --- Generate bar chart ---
-    fig, ax = plt.subplots()
-    ax.bar(trend_counts.keys(), trend_counts.values(), color=["green", "red", "orange", "gray"])
-    ax.set_title("Weekly Trend Summary")
-    ax.set_ylabel("Count")
-    st.pyplot(fig)
-
-    # --- Encode HTML for download ---
-    html_bytes = report_html.encode('utf-8')
-    b64 = base64.b64encode(html_bytes).decode()
-    href = f'<a href="data:text/html;base64,{b64}" download="2025_Week_31_Report.html">Download Report as HTML</a>'
-    st.markdown(href, unsafe_allow_html=True)
-
-    # --- Optional Image Output (if needed later) ---
-    # img_buf = io.BytesIO()
-    # fig.savefig(img_buf, format='png')
-    # img_buf.seek(0)
-    # img_base64 = base64.b64encode(img_buf.read()).decode()
-    # st.markdown(f'<img src="data:image/png;base64,{img_base64}" style="max-width:600px; display:block; margin:auto;">', unsafe_allow_html=True)
+else:
+    st.warning("No data available from Google Sheets.")
