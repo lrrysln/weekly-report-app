@@ -1,100 +1,155 @@
 import streamlit as st
+from datetime import datetime
 import pandas as pd
-import datetime
-import re
 import gspread
 from google.oauth2.service_account import Credentials
+from io import StringIO
 
-# --- Auth ---
+# --- Google Sheets Setup ---
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
-creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
+creds = Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"], scopes=SCOPES
+)
 client = gspread.authorize(creds)
+sheet = client.open("Your Google Sheet Name").sheet1
 
-# --- Load Data from Google Sheets ---
-SHEET_NAME = "Construction Weekly Updates"
-WORKSHEET_NAME = "Sheet1"
-spreadsheet = client.open(SHEET_NAME)
-worksheet = spreadsheet.worksheet(WORKSHEET_NAME)
-data = worksheet.get_all_records()
-df = pd.DataFrame(data)
+# --- Helper Functions ---
+def get_current_year_week():
+    now = datetime.now()
+    year, week, _ = now.isocalendar()
+    return f"{year} Week {week}"
 
-# --- Format date columns to MM/DD/YY ---
-date_cols = [col for col in df.columns if any(keyword in col for keyword in [
-    "Baseline", "TCO", "Walk", "Turnover", "Open to Train", "Store Opening", "Start"
-])]
-for col in date_cols:
-    df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%m/%d/%y')
+def get_store_names():
+    data = sheet.get_all_records()
+    df = pd.DataFrame(data)
+    return sorted(df["Store Name"].dropna().unique())
 
-# --- Weekly Summary HTML Generator ---
-def generate_weekly_summary(df, password):
-    if password != "1234":  # your password
-        return None, "❌ Incorrect password."
+def get_previous_week_data(current_week):
+    all_data = pd.DataFrame(sheet.get_all_records())
+    return all_data[all_data["Yr Wk"] != current_week]
 
-    if df.empty:
-        return None, "🚫 No data available to summarize."
+def extract_keyword_notes(note):
+    keywords = ["delay", "permit", "weather", "inspection", "reschedule", "utility"]
+    note_lower = note.lower()
+    return any(keyword in note_lower for keyword in keywords)
 
-    html = [
-        "<html><head><style>",
-        "body{font-family:Arial;padding:20px}",
-        "h1{text-align:center}",
-        "h2{background:#cce5ff;padding:10px;border-radius:4px}",
-        ".entry{border:1px solid #ccc;padding:10px;margin:10px 0;border-radius:4px;background:#f9f9f9}",
-        "ul{margin:0;padding-left:20px}",
-        ".label{font-weight:bold}",
-        "</style></head><body>",
-        "<h1>Weekly Summary Report</h1>"
-    ]
-
-    # Group by Subject (your new column)
-    group_col = "Subject"
-    for group_name, group_df in df.groupby(group_col):
-        html.append(f"<h2>{group_name}</h2>")
-        for _, row in group_df.iterrows():
-            html.append('<div class="entry"><ul>')
-            html.append(f"<li><span class='label'>Store Name:</span> {row.get('Store Name', '')}</li>")
-            html.append(f"<li><span class='label'>Store Number:</span> {row.get('Store Number', '')}</li>")
-            html.append(f"<li><span class='label'>Prototype:</span> {row.get('Prototype', '')}</li>")
-
-            # Dates section
-            html.append("<li><span class='label'>Dates:</span><ul>")
-            for label in ["Start", "Baseline TCO", "TCO", "Baseline Ops Walk", "Ops Walk", "Baseline Turnover", "Turnover", "Baseline Open to Train", "Open to Train", "Baseline Store Opening", "Store Opening"]:
-                val = row.get(label, "")
-                html.append(f"<li><span class='label'>{label}:</span> {val}</li>")
-            html.append("</ul></li>")
-
-            # Notes with bullets, removing any leading bullet chars
-            notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
-            if notes:
-                html.append("<li><span class='label'>Notes:</span><ul>")
-                html += [f"<li>{n}</li>" for n in notes]
-                html.append("</ul></li>")
-
-            html.append("</ul></div>")
-
-    html.append("</body></html>")
-    return df, "".join(html)
-
-# --- Streamlit UI ---
-st.title("🏗️ Construction Weekly Report")
-
-st.subheader("Current Data Table")
-st.dataframe(df)
-
-st.subheader("🔐 Generate Weekly Summary Report")
-password = st.text_input("Enter Password", type="password")
-if st.button("Generate Report"):
-    df_result, html = generate_weekly_summary(df, password)
-    if html:
-        st.markdown("### Weekly Summary")
-        st.components.v1.html(html, height=700, scrolling=True)
-        st.download_button(
-            "Download Summary as HTML",
-            data=html,
-            file_name=f"Weekly_Summary_{datetime.datetime.now().strftime('%Y%m%d')}.html",
-            mime="text/html"
-        )
+def compute_store_opening_trend(prev_date, curr_date):
+    if prev_date < curr_date:
+        return "pushed"
+    elif prev_date > curr_date:
+        return "pulled in"
     else:
-        st.error(html)
+        return "held"
+
+# --- App UI ---
+st.title("Weekly Construction Update")
+
+with st.form("project_form"):
+    store_options = get_store_names()
+    store_name = st.selectbox("Select Store", options=store_options)
+    baseline_toggle = st.checkbox("Is this the baseline week for this project?", value=False)
+
+    tco_date = st.date_input("TCO Date")
+    ops_walk_date = st.date_input("Ops Walk Date")
+    turnover_date = st.date_input("Turnover Date")
+    open_to_train_date = st.date_input("Open to Train Date")
+    store_opening_date = st.date_input("Store Opening Date")
+    notes = st.text_area("Project Notes")
+
+    submitted = st.form_submit_button("Submit")
+
+    if submitted:
+        year_week = get_current_year_week()
+
+        row = {
+            "Store Name": store_name,
+            "Baseline": "Yes" if baseline_toggle else "No",
+            "TCO": tco_date.strftime("%m/%d/%Y"),
+            "Ops Walk": ops_walk_date.strftime("%m/%d/%Y"),
+            "Turnover": turnover_date.strftime("%m/%d/%Y"),
+            "Open to Train": open_to_train_date.strftime("%m/%d/%Y"),
+            "Store Opening": store_opening_date.strftime("%m/%d/%Y"),
+            "Notes": notes,
+            "Yr Wk": year_week
+        }
+
+        sheet.append_row(list(row.values()))
+        st.success("Submission saved!")
+
+# --- Password-Protected Summary ---
+password = st.text_input("Enter password to view executive summary", type="password")
+if password == st.secrets["report_password"]:
+    data = pd.DataFrame(sheet.get_all_records())
+    current_week = get_current_year_week()
+    current_data = data[data["Yr Wk"] == current_week]
+    previous_data = get_previous_week_data(current_week)
+
+    def parse_date_safe(val):
+        try:
+            return datetime.strptime(val, "%m/%d/%Y")
+        except Exception:
+            return None
+
+    summary_rows = []
+
+    for _, row in current_data.iterrows():
+        store = row["Store Name"]
+        current_open = parse_date_safe(row["Store Opening"])
+        baseline_row = data[(data["Store Name"] == store) & (data["Baseline"] == "Yes")].head(1)
+        prev_row = previous_data[(previous_data["Store Name"] == store)].sort_values(by="Yr Wk", ascending=False).head(1)
+
+        if not baseline_row.empty:
+            baseline_open = parse_date_safe(baseline_row.iloc[0]["Store Opening"])
+            delta = (current_open - baseline_open).days if current_open and baseline_open else None
+        else:
+            delta = None
+
+        if not prev_row.empty:
+            prev_open = parse_date_safe(prev_row.iloc[0]["Store Opening"])
+            trend = compute_store_opening_trend(prev_open, current_open)
+        else:
+            trend = "N/A"
+
+        summary_rows.append({
+            "Project": store,
+            "Flag": "Critical" if delta and abs(delta) >= 5 else "",
+            "Store Opening Delta": delta,
+            "Trend": trend,
+            "Notes": row["Notes"] if extract_keyword_notes(row["Notes"]) else "see report below"
+        })
+
+    summary_df = pd.DataFrame(summary_rows)
+
+    # Display summary table
+    st.subheader("Executive Summary")
+    st.dataframe(summary_df)
+
+    # Generate HTML summary
+    html_summary = f"""
+    <html>
+    <head><style>
+    table {{
+        width: 100%;
+        border-collapse: collapse;
+    }}
+    th, td {{
+        border: 1px solid #ddd;
+        padding: 8px;
+    }}
+    th {{
+        background-color: #f2f2f2;
+    }}
+    </style></head>
+    <body>
+    <h2>Executive Summary – {current_week}</h2>
+    {summary_df.to_html(index=False)}
+    <h3>Full Report</h3>
+    {current_data.to_html(index=False)}
+    </body>
+    </html>
+    """
+
+    st.download_button("Download HTML Summary", data=html_summary, file_name=f"Construction_Summary_{current_week}.html", mime="text/html")
