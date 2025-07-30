@@ -122,7 +122,7 @@ password = st.text_input("Enter Password", type="password")
 
 # Weekly trend summary chart
 trend_counts = summary_df['Trend'].value_counts().reindex(['🟢 Pulled In', '🔴 Pushed', '🟡 Held', '⚪ Baseline'], fill_value=0)
-colors = {'Pulled In': 'green', 'Pushed': 'red', 'Held': 'yellow', 'Baseline': 'grey'}
+colors = {'🟢 Pulled In': 'green', '🔴 Pushed': 'red', '🟡 Held': 'yellow', '⚪ Baseline': 'grey'}
 fig, ax = plt.subplots()
 ax.bar(trend_counts.index, trend_counts.values, color=[colors.get(x, 'grey') for x in trend_counts.index])
 ax.set_ylabel("Count")
