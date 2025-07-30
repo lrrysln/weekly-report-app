@@ -14,6 +14,11 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive"
 ]
 
+# Ensure credentials are present in st.secrets
+if "gcp_service_account" not in st.secrets:
+    st.error("Service account credentials not found in secrets.")
+    st.stop()
+
 creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
 client = gspread.authorize(creds)
 
@@ -46,7 +51,7 @@ df['Store Name'] = df['Store Name'].str.title()
 # Convert and format date columns
 date_cols = [col for col in df.columns if any(k in col for k in ["⚪ Baseline", "TCO", "Walk", "Turnover", "Open to Train", "Store Opening", "Start"])]
 for col in date_cols:
-    df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%m/%d/%y')
+    df[col] = pd.to_datetime(df[col], errors='coerce')
 
 # --- Calculate Store Opening Delta and Flag ---
 df['⚪ Baseline Store Opening'] = pd.to_datetime(df['⚪ Baseline Store Opening'], errors='coerce')
@@ -99,32 +104,6 @@ df['Trend'] = df.index.map(trend_map)
 # Week info
 df['Year Week'] = df['Week of the Year'].astype(str)
 df = df.sort_values(by=['Store Name', 'Year Week'])
-
-trend_map = {}
-grouped = df.groupby('Store Name')
-for store, group in grouped:
-    group = group.sort_values('Year Week')
-    prev_date = None
-    for idx, row in group.iterrows():
-        current_date = pd.to_datetime(row.get("Store Opening"), errors='coerce')
-        Baseline_date = pd.to_datetime(row.get("⚪ Baseline Store Opening"), errors='coerce')
-        if pd.isna(current_date):
-            trend_map[idx] = "🟡 Held"
-            continue
-        if pd.notna(Baseline_date) and current_date == Baseline_date:
-            trend_map[idx] = "⚪ Baseline"
-            continue
-        if prev_date is None:
-            trend_map[idx] = "🟡 Held"
-        else:
-            if current_date < prev_date:
-                trend_map[idx] = "🟢 Pulled In"
-            elif current_date > prev_date:
-                trend_map[idx] = "🔴 Pushed"
-            else:
-                trend_map[idx] = "🟡 Held"
-        prev_date = current_date
-df['Trend'] = df.index.map(trend_map)
 
 # Filter notes
 keywords = ["behind schedule", "lagging", "delay", "critical path", "cpm impact", "work on hold", "stop work order",
@@ -184,8 +163,9 @@ def fig_to_base64(fig):
 
 def generate_weekly_summary(df, summary_df, fig, password):
     if password != "1234":
-        return None, "❌ Incorrect password."
-
+        st.error("❌ Incorrect password.")
+        return None, ""
+    
     img_base64 = fig_to_base64(fig)
     today = datetime.date.today()
     week_number = today.isocalendar()[1]
@@ -212,14 +192,9 @@ def generate_weekly_summary(df, summary_df, fig, password):
 
     group_col = "Subject" if "Subject" in df.columns else "Store Name"
     for group_name, group_df in df.groupby(group_col):
-    html.append(f"<h2>{group_name}</h2>")
-    
-    # Sort by Prototype
-    group_df = group_df.sort_values(by='Prototype')
-
-    for _, row in group_df.iterrows():
-        
         html.append(f"<h2>{group_name}</h2>")
+        group_df = group_df.sort_values(by='Prototype')
+
         for _, row in group_df.iterrows():
             html.append('<div class="entry"><ul>')
             
@@ -232,37 +207,4 @@ def generate_weekly_summary(df, summary_df, fig, password):
             html.append(f"<div style='text-align:center; font-weight:bold; font-size:20px;'>{store_num} {store_name} - {subject} ({cpm})</div><br>")
 
             date_fields = ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening"]
-            html.append("<li><span class='label'>Dates:</span><ul>")
-            for field in date_fields:
-                val = row.get(field)
-                Baseline_val = row.get(f"⚪ Baseline {field}")
-                if pd.notna(Baseline_val) and val == Baseline_val:
-                    html.append(f"<li><b style='color:red;'> Baseline</b>: {field} - {val}</li>")
-                else:
-                    html.append(f"<li>{field}: {val}</li>")
-            html.append("</ul></li>")
-
-            notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
-            if notes:
-                html.append("<li><span class='label'>Notes:</span><ul>")
-                html += [f"<li>{n}</li>" for n in notes]
-                html.append("</ul></li>")
-
-            html.append("</ul></div>")
-
-    html.append("</body></html>")
-    return df, "".join(html)
-
-if st.button("Generate Report"):
-    df_result, html = generate_weekly_summary(df, summary_df, fig, password)
-    if html is not None:
-        st.markdown("### Weekly Summary")
-        st.components.v1.html(html, height=800, scrolling=True)
-        st.download_button(
-            "Download Summary as HTML",
-            data=html,
-            file_name=f"Weekly_Summary_{datetime.datetime.now().strftime('%Y%m%d')}.html",
-            mime="text/html"
-        )
-    else:
-        st.error(html)
+            html.append("<li><span class='label'>Dates:</span><ul
