@@ -210,4 +210,5 @@ def generate_weekly_summary(df, summary_df, fig, password):
             cpm = row.get('CPM', '')
             subject = row.get('Subject', 'EV Projects')
 
-            html.append(f"<div style='text-align:center; font-weight:bold; font-size:20px;'>{store_num} {store_name} - {
+            html.append(f"<div style='text-align:center; font-weight:bold; font-size:20px;'>{store_num} {store_name} - {subject} ({cpm})</div><br>")
+
