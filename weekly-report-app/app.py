@@ -46,11 +46,10 @@ if df.empty:
 df.columns = [c.strip() for c in df.columns]
 
 # Ensure the column names are as expected (for debugging)
-st.write(df.columns)  # This will show all the column names in the app, which will help you verify them
+st.write(df.columns)
 
 # Ensure 'Baseline' column exists in the data
 if 'Baseline' in df.columns:
-    # Convert 'Baseline' column to datetime
     df['Baseline'] = pd.to_datetime(df['Baseline'], errors='coerce')
 else:
     st.warning("'Baseline' column is missing from the dataset.")
@@ -62,7 +61,6 @@ for col in date_cols:
     df[col] = pd.to_datetime(df[col], errors='coerce')
 
 # --- Calculate Store Opening Delta and Flag ---
-# Calculate Store Opening Delta using 'Baseline' and 'Store Opening'
 df['Store Opening Delta'] = df.apply(
     lambda row: (row['Store Opening'] - row['Baseline']).days
     if pd.notna(row['Baseline']) and pd.notna(row['Store Opening'])
@@ -70,7 +68,6 @@ df['Store Opening Delta'] = df.apply(
     axis=1
 )
 
-# Flag critical delays (delta >= 5)
 df['Flag'] = df['Store Opening Delta'].apply(lambda x: "Critical" if pd.notna(x) and x >= 5 else "")
 
 # --- Determine Trend Category ---
@@ -87,7 +84,6 @@ for store, group in grouped:
             trend_map[idx] = "🟡 Held"
             continue
 
-        # Use Baseline if exact match with baseline date
         if pd.notna(baseline_date) and current_date == baseline_date:
             trend_map[idx] = "⚪ Baseline"
             continue
@@ -146,67 +142,8 @@ st.dataframe(visible_df)
 st.subheader("🔐 Generate Weekly Summary Report")
 password = st.text_input("Enter Password", type="password")
 
-# Count the occurrences of each trend
-trend_counts = df['Trend'].value_counts()
-
-# Define a color palette for the trends
-colors = {
-    "🟡 Held": "yellow",
-    "⚪ Baseline": "gray",
-    "🟢 Pulled In": "green",
-    "🔴 Pushed": "red"
-}
-
-# Plotting the bar chart
-fig, ax = plt.subplots()
-bars = ax.bar(trend_counts.index, trend_counts.values, color=[colors.get(x, 'grey') for x in trend_counts.index])
-ax.set_ylabel("Count")
-ax.set_xlabel("Trend")
-
-# Annotate the bars with values (whole numbers)
-for bar in bars:
-    height = bar.get_height()
-    ax.annotate(f'{int(height)}', xy=(bar.get_x() + bar.get_width() / 2, height),
-                xytext=(0, 3), textcoords="offset points",
-                ha='center', va='bottom')
-
-plt.tight_layout()
-
-# Annotate the bars with values (whole numbers)
-for bar in bars:
-    height = bar.get_height()
-    ax.annotate(f'{int(height)}', xy=(bar.get_x() + bar.get_width() / 2, height),
-                xytext=(0, 3), textcoords="offset points",
-                ha='center', va='bottom')
-    
-plt.tight_layout()
-
-def fig_to_base64(fig):
-    buf = BytesIO()
-    fig.savefig(buf, format="png", bbox_inches='tight')
-    buf.seek(0)
-    return base64.b64encode(buf.read()).decode()
-
-# Password input for generating the report
-st.subheader("🔐 Generate Weekly Summary Report")
-
-# Password input field
-password = st.text_input("Enter Password", type="password")
-
-# Only show the "Generate Report" button if the password is correct
-if password == "1234":
-    # Add the button to generate the report when password is correct
-    if st.button("Generate Report"):
-        # Your report generation logic goes here
-        df, report_html = generate_weekly_summary(df, summary_df, fig, password)
-        if df is not None:
-            st.markdown(report_html, unsafe_allow_html=True)
-else:
-    # If the password is incorrect, show an error message
-    if password:
-        st.error("❌ Incorrect password.")
-
-    
+# Function to generate the report HTML
+def generate_report(df, summary_df, fig):
     img_base64 = fig_to_base64(fig)
     today = datetime.date.today()
     week_number = today.isocalendar()[1]
@@ -231,7 +168,6 @@ else:
         "<hr>"
     ]
 
-    # Group by store name or subject, depending on what makes sense
     group_col = "Subject" if "Subject" in df.columns else "Store Name"
     
     for group_name, group_df in df.groupby(group_col):
@@ -252,25 +188,4 @@ else:
 
             # Dates Section
             date_fields = ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening"]
-            html.append("<li><span class='label'>Dates:</span><ul>")  # <-- fixed line
-            for field in date_fields:
-                val = row.get(field)
-                Baseline_val = row.get(f"⚪ Baseline {field}")
-                if pd.notna(Baseline_val) and val == Baseline_val:
-                    html.append(f"<li><b style='color:red;'> Baseline</b>: {field} - {val}</li>")
-                else:
-                    html.append(f"<li>{field}: {val}</li>")
-            html.append("</ul></li>")
-
-            # Notes Section
-            notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
-            if notes:
-                html.append("<li><span class='label'>Notes:</span><ul>")
-                html += [f"<li>{n}</li>" for n in notes]
-                html.append("</ul></li>")
-
-            html.append("</ul></div>")  # Closing the div for the store entry
-
-    html.append("</body></html>")
-    return df, "".join(html)
-
+            html.append("<li><span class='label'>Dates:</span><ul
