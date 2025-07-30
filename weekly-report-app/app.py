@@ -44,14 +44,14 @@ df.columns = [c.strip() for c in df.columns]
 df['Store Name'] = df['Store Name'].str.title()
 
 # Convert and format date columns
-date_cols = [col for col in df.columns if any(k in col for k in ["Baseline", "TCO", "Walk", "Turnover", "Open to Train", "Store Opening", "Start"])]
+date_cols = [col for col in df.columns if any(k in col for k in ["⚪ ⚪ Baseline", "TCO", "Walk", "Turnover", "Open to Train", "Store Opening", "Start"])]
 for col in date_cols:
     df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%m/%d/%y')
 
 # Calculate deltas and flags
 try:
     df['Store Opening Delta'] = (
-        pd.to_datetime(df['Store Opening'], errors='coerce') - pd.to_datetime(df['Baseline Store Opening'], errors='coerce')
+        pd.to_datetime(df['Store Opening'], errors='coerce') - pd.to_datetime(df['⚪ ⚪ Baseline Store Opening'], errors='coerce')
     ).dt.days
     df['Flag'] = df['Store Opening Delta'].apply(lambda x: "Critical" if pd.notna(x) and x >= 5 else "")
 except:
@@ -69,22 +69,22 @@ for store, group in grouped:
     prev_date = None
     for idx, row in group.iterrows():
         current_date = pd.to_datetime(row.get("Store Opening"), errors='coerce')
-        baseline_date = pd.to_datetime(row.get("Baseline Store Opening"), errors='coerce')
+        ⚪ ⚪ Baseline_date = pd.to_datetime(row.get("⚪ ⚪ Baseline Store Opening"), errors='coerce')
         if pd.isna(current_date):
-            trend_map[idx] = "held"
+            trend_map[idx] = "🟡 🟡 🟡 Held"
             continue
-        if pd.notna(baseline_date) and current_date == baseline_date:
-            trend_map[idx] = "baseline"
+        if pd.notna(⚪ ⚪ Baseline_date) and current_date == ⚪ ⚪ Baseline_date:
+            trend_map[idx] = "⚪ ⚪ Baseline"
             continue
         if prev_date is None:
-            trend_map[idx] = "held"
+            trend_map[idx] = "🟡 🟡 🟡 Held"
         else:
             if current_date < prev_date:
-                trend_map[idx] = "pulled in"
+                trend_map[idx] = "🟢 Pulled In"
             elif current_date > prev_date:
-                trend_map[idx] = "pushed"
+                trend_map[idx] = "🔴 🔴 Pushed"
             else:
-                trend_map[idx] = "held"
+                trend_map[idx] = "🟡 🟡 🟡 Held"
         prev_date = current_date
 df['Trend'] = df.index.map(trend_map)
 
@@ -121,8 +121,8 @@ st.subheader("🔐 Generate Weekly Summary Report")
 password = st.text_input("Enter Password", type="password")
 
 # Weekly trend summary chart
-trend_counts = summary_df['Trend'].value_counts().reindex(['pulled in', 'pushed', 'held', 'baseline'], fill_value=0)
-colors = {'pulled in': 'green', 'pushed': 'red', 'held': 'yellow', 'baseline': 'grey'}
+trend_counts = summary_df['Trend'].value_counts().reindex(['🟢 Pulled In', '🔴 🔴 Pushed', '🟡 🟡 🟡 Held', '⚪ ⚪ Baseline'], fill_value=0)
+colors = {'🟢 Pulled In': 'green', '🔴 🔴 Pushed': 'red', '🟡 🟡 🟡 Held': 'yellow', '⚪ ⚪ Baseline': 'grey'}
 fig, ax = plt.subplots()
 ax.bar(trend_counts.index, trend_counts.values, color=[colors.get(x, 'grey') for x in trend_counts.index])
 ax.set_ylabel("Count")
@@ -177,9 +177,9 @@ def generate_weekly_summary(df, summary_df, fig, password):
             html.append("<li><span class='label'>Dates:</span><ul>")
             for field in date_fields:
                 val = row.get(field)
-                baseline_val = row.get(f"Baseline {field}")
-                if pd.notna(baseline_val) and val == baseline_val:
-                    html.append(f"<li><b style='color:red;'>Baseline</b>: {field} - {val}</li>")
+                ⚪ ⚪ Baseline_val = row.get(f"⚪ ⚪ Baseline {field}")
+                if pd.notna(⚪ ⚪ Baseline_val) and val == ⚪ ⚪ Baseline_val:
+                    html.append(f"<li><b style='color:red;'>⚪ ⚪ Baseline</b>: {field} - {val}</li>")
                 else:
                     html.append(f"<li>{field}: {val}</li>")
             html.append("</ul></li>")
