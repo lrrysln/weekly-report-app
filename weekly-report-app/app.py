@@ -25,6 +25,7 @@ client = gspread.authorize(creds)
 SPREADSHEET_ID = "1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w"
 WORKSHEET_NAME = "Sheet1"
 
+# --- Function to load data from Google Sheets ---
 @st.cache_data(ttl=600)
 def load_data():
     try:
@@ -153,8 +154,6 @@ if st.session_state.password_valid:
 else:
     if password:
         st.error("❌ Incorrect password.")
-
-
 
 # --- Plot Trends Function ---
 def plot_trends(df):
