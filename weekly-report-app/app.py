@@ -5,6 +5,8 @@ import re
 import matplotlib.pyplot as plt
 import gspread
 from google.oauth2.service_account import Credentials
+import base64
+from io import BytesIO
 
 # --- Auth & Google Sheets Setup ---
 SCOPES = [
@@ -43,39 +45,6 @@ date_cols = [col for col in df.columns if any(k in col for k in ["Baseline", "TC
 for col in date_cols:
     df[col] = pd.to_datetime(df[col], errors='coerce')
 
-# Get Store Names for Dropdown
-store_options = sorted(df["Store Name"].dropna().unique())
-
-st.sidebar.title("Add New Project")
-st.sidebar.write("Please update new projects manually in the Google Sheet.")
-
-# Main Form
-st.title("📝 Weekly Construction Update")
-
-with st.form("weekly_update_form", clear_on_submit=True):
-    st.subheader("Select Project")
-    store_name = st.selectbox("Store Name", options=store_options)
-
-    store_number = st.text_input("Store Number")
-    subject = st.text_input("Subject")
-    prototype = st.text_input("Prototype")
-    cpm = st.text_input("CPM")
-    start_date = st.date_input("Start Date")
-
-    baseline_toggle = st.checkbox("Baseline Dates for All Milestones")
-
-    tco_date = st.date_input("TCO Date")
-    ops_walk_date = st.date_input("Ops Walk Date")
-    turnover_date = st.date_input("Turnover Date")
-    open_to_train_date = st.date_input("Open to Train Date")
-    store_opening_date = st.date_input("Store Opening Date")
-
-    notes = st.text_area("Notes (Press Enter for new bullet point)", value="• ", height=200)
-
-    submitted = st.form_submit_button("Submit")
-    if submitted:
-        st.success("Submission received! (Note: Manual update to Google Sheet required)")
-
 # Calculate deltas and flags
 df['Baseline Store Opening Date'] = df['Baseline Store Opening']
 df['Current Store Opening Date'] = df['Store Opening']
@@ -108,7 +77,7 @@ for store, group in grouped:
         prev_date = current_date
 df['Trend'] = df.index.map(trend_map)
 
-keywords = [  # your full list... shortened here for brevity
+keywords = [
     "behind schedule", "lagging", "delay", "critical path", "cpm impact", "work on hold", "stop work order",
     "reschedule", "off track", "schedule drifting", "missed milestone", "budget overrun", "cost impact",
     "change order pending", "claim submitted", "dispute", "litigation risk", "schedule variance",
@@ -124,7 +93,7 @@ def check_notes(text):
             return True
     return False
 
-df['Notes'] = df['Notes'].fillna("")  # fill NaNs just in case
+df['Notes'] = df['Notes'].fillna("")
 df['Notes Filtered'] = df['Notes'].apply(lambda x: x if check_notes(x) else "see report below")
 
 summary_cols = ['Store Name', 'Flag', 'Store Opening Delta', 'Trend', 'Notes Filtered']
@@ -140,16 +109,30 @@ ax.set_title("Weekly Trend Summary")
 ax.set_ylabel("Count")
 ax.set_xlabel("Trend")
 
+# Show plot on main page
 st.pyplot(fig)
 
+# Show Executive Summary Table on main page
 st.subheader("Executive Summary Table")
 st.dataframe(summary_df.style.format({"Store Opening Delta": "{:.0f}"}))
 
-def generate_weekly_summary(df, password):
+# Function to convert matplotlib fig to PNG base64 for embedding in HTML
+def fig_to_base64(fig):
+    buf = BytesIO()
+    fig.savefig(buf, format="png", bbox_inches='tight')
+    buf.seek(0)
+    img_bytes = buf.read()
+    encoded = base64.b64encode(img_bytes).decode()
+    return encoded
+
+def generate_weekly_summary(df, summary_df, fig, password):
     if password != "1234":
         return None, "❌ Incorrect password."
     if df.empty:
         return None, "🚫 No data available to summarize."
+
+    # Convert plot to base64 string
+    img_base64 = fig_to_base64(fig)
 
     html = [
         "<html><head><style>",
@@ -159,10 +142,15 @@ def generate_weekly_summary(df, password):
         ".entry{border:1px solid #ccc;padding:10px;margin:10px 0;border-radius:4px;background:#f9f9f9}",
         "ul{margin:0;padding-left:20px}",
         ".label{font-weight:bold}",
+        "table {border-collapse: collapse; width: 100%;}",
+        "th, td {border: 1px solid #ddd; padding: 8px;}",
+        "th {background-color: #f2f2f2;}",
         "</style></head><body>",
         "<h1>Weekly Summary Report</h1>",
         "<h2>Executive Summary</h2>",
-        summary_df.to_html(index=False),
+        summary_df.to_html(index=False, escape=False),
+        "<h2>Weekly Trend Summary</h2>",
+        f'<img src="data:image/png;base64,{img_base64}" style="max-width:600px; width:100%;">',
         "<hr>"
     ]
 
@@ -197,7 +185,7 @@ def generate_weekly_summary(df, password):
 st.subheader("🔐 Generate Weekly Summary Report")
 password = st.text_input("Enter Password", type="password")
 if st.button("Generate Report"):
-    df_result, html = generate_weekly_summary(df, password)
+    df_result, html = generate_weekly_summary(df, summary_df, fig, password)
     if html is not None:
         st.markdown("### Weekly Summary")
         st.components.v1.html(html, height=800, scrolling=True)
