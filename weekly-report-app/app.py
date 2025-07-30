@@ -146,13 +146,15 @@ else:
 # Only show the "Generate Report" button if the password is correct
 if st.session_state.password_valid:
     if st.button("Generate Report"):
-        fig = plot_trends(df)
+        fig = plot_trends(df)  # This should now be available and defined above
         df, report_html = generate_report(df, summary_df, fig)
         if df is not None:
             st.markdown(report_html, unsafe_allow_html=True)
 else:
     if password:
         st.error("❌ Incorrect password.")
+
+
 
 # --- Plot Trends Function ---
 def plot_trends(df):
