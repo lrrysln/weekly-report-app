@@ -17,14 +17,14 @@ credentials = Credentials.from_service_account_info(
 client = gspread.authorize(credentials)
 
 # --- Config ---
-SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=0"
+https://docs.google.com/spreadsheets/d/1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w/edit?usp=sharing = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=0"
 Sheet1 = "Sheet1"
 
 # --- Load data from Google Sheet ---
 @st.cache_data(ttl=600)
 def load_data():
     try:
-        sheet = client.open_by_url(SPREADSHEET_URL).worksheet(Sheet1)
+        sheet = client.open_by_url(https://docs.google.com/spreadsheets/d/1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w/edit?usp=sharing).worksheet(Sheet1)
         data = sheet.get_all_records()
         df = pd.DataFrame(data)
         df.columns = df.columns.str.strip()  # Ensure no leading/trailing spaces
