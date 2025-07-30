@@ -42,25 +42,30 @@ if df.empty:
     st.warning("⚠️ No data loaded from Google Sheet yet.")
     st.stop()
 
-# Clean column names
+# Clean column names by removing spaces and special characters
 df.columns = [c.strip() for c in df.columns]
 
-# Format store names
-df['Store Name'] = df['Store Name'].str.title()
+# Ensure the column names are as expected (for debugging)
+st.write(df.columns)  # This will show all the column names in the app, which will help you verify them
 
-# Convert and format date columns
-date_cols = [col for col in df.columns if any(k in col for k in ["⚪ Baseline", "TCO", "Walk", "Turnover", "Open to Train", "Store Opening", "Start"])]
+# Ensure 'Baseline' column exists in the data
+if 'Baseline' in df.columns:
+    # Convert 'Baseline' column to datetime
+    df['Baseline'] = pd.to_datetime(df['Baseline'], errors='coerce')
+else:
+    st.warning("'Baseline' column is missing from the dataset.")
+    df['Baseline'] = pd.NaT  # If missing, set the column to NaT (Not a Time)
+
+# Convert other date columns
+date_cols = [col for col in df.columns if any(k in col for k in ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening", "Start"])]
 for col in date_cols:
     df[col] = pd.to_datetime(df[col], errors='coerce')
 
 # --- Calculate Store Opening Delta and Flag ---
-df['⚪ Baseline Store Opening'] = pd.to_datetime(df['⚪ Baseline Store Opening'], errors='coerce')
-df['Store Opening'] = pd.to_datetime(df['Store Opening'], errors='coerce')
-
-# Calculate delta only when baseline date exists
+# Calculate Store Opening Delta using 'Baseline' and 'Store Opening'
 df['Store Opening Delta'] = df.apply(
-    lambda row: (row['Store Opening'] - row['⚪ Baseline Store Opening']).days
-    if pd.notna(row['⚪ Baseline Store Opening']) and pd.notna(row['Store Opening'])
+    lambda row: (row['Store Opening'] - row['Baseline']).days
+    if pd.notna(row['Baseline']) and pd.notna(row['Store Opening'])
     else None,
     axis=1
 )
@@ -76,13 +81,13 @@ for store, group in grouped:
     prev_date = None
     for idx, row in group.iterrows():
         current_date = row['Store Opening']
-        baseline_date = row['⚪ Baseline Store Opening']
+        baseline_date = row['Baseline']
 
         if pd.isna(current_date):
             trend_map[idx] = "🟡 Held"
             continue
 
-        # Use ⚪ Baseline if exact match with baseline date
+        # Use Baseline if exact match with baseline date
         if pd.notna(baseline_date) and current_date == baseline_date:
             trend_map[idx] = "⚪ Baseline"
             continue
@@ -205,28 +210,4 @@ def generate_weekly_summary(df, summary_df, fig, password):
             cpm = row.get('CPM', '')
             subject = row.get('Subject', 'EV Projects')
 
-            html.append(f"<div style='text-align:center; font-weight:bold; font-size:20px;'>{store_num} {store_name} - {subject} ({cpm})</div><br>")
-
-            # Fixed the unterminated string literal
-            date_fields = ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening"]
-            html.append("<li><span class='label'>Dates:</span><ul>")  # <-- fixed line
-            for field in date_fields:
-                val = row.get(field)
-                Baseline_val = row.get(f"⚪ Baseline {field}")
-                if pd.notna(Baseline_val) and val == Baseline_val:
-                    html.append(f"<li><b style='color:red;'> Baseline</b>: {field} - {val}</li>")
-                else:
-                    html.append(f"<li>{field}: {val}</li>")
-            html.append("</ul></li>")
-
-            notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
-            if notes:
-                html.append("<li><span class='label'>Notes:</span><ul>")
-                html += [f"<li>{n}</li>" for n in notes]
-                html.append("</ul></li>")
-
-            html.append("</ul></div>")
-
-    html.append("</body></html>")
-    return df, "".join(html)
-
+            html.append(f"<div style='text-align:center; font-weight:bold; font-size:20px;'>{store_num} {store_name} - {
