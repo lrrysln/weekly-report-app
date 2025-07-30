@@ -55,7 +55,7 @@ df['Flag'] = df['Store Opening Delta'].apply(lambda x: "Critical" if pd.notna(x)
 trend_map = {}
 grouped = df.groupby('Store Name')
 for store, grp in grouped:
-    grp = grp.sort_values('Week of the Year')
+    grp = grp.sort_values('Year Week')
     prev = None
     for idx, row in grp.iterrows():
         cur = pd.to_datetime(row.get("Store Opening"), errors='coerce')
