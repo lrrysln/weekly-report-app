@@ -20,7 +20,7 @@ if "gcp_service_account" not in st.secrets:
 creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
 client = gspread.authorize(creds)
 
-SPREADSHEET_ID = "..."
+SPREADSHEET_ID = "1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w"
 WORKSHEET_NAME = "Sheet1"
 
 @st.cache_data(ttl=600)
