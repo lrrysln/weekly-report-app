@@ -1,76 +1,59 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
 from google.oauth2.service_account import Credentials
 import gspread
 
 # --- Google Sheets Auth ---
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
+    "https://www.googleapis.com/auth/drive",
 ]
-creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
-client = gspread.authorize(creds)
-sheet = client.open("Construction Weekly Updates").sheet1  # <-- Make sure this name is EXACT
 
-# --- Streamlit Setup ---
-st.set_page_config(page_title="Weekly Construction Update", layout="wide")
-st.title("Weekly Construction Update")
+credentials = Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"],
+    scopes=SCOPES,
+)
 
-# --- Load Sheet as DataFrame ---
-try:
-    df = pd.DataFrame(sheet.get_all_records())
-    df.columns = df.columns.str.strip()  # Remove extra spaces in column names
-except Exception as e:
-    st.error(f"❌ Failed to load data from Google Sheet: {e}")
+client = gspread.authorize(credentials)
+
+# --- Config ---
+SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=0"
+Sheet1 = "Sheet1"
+
+# --- Load data from Google Sheet ---
+@st.cache_data(ttl=600)
+def load_data():
+    try:
+        sheet = client.open_by_url(SPREADSHEET_URL).worksheet(Sheet1)
+        data = sheet.get_all_records()
+        df = pd.DataFrame(data)
+        df.columns = df.columns.str.strip()  # Ensure no leading/trailing spaces
+        return df
+    except Exception as e:
+        st.error(f"❌ Failed to load data from Google Sheet: {e}")
+        return pd.DataFrame()
+
+df = load_data()
+
+if df.empty:
     st.stop()
 
-# --- Helper Functions ---
+# --- Get store options ---
 def get_store_names():
     if "Store Name" not in df.columns:
-        st.warning(f"⚠️ 'Store Name' column not found. Available columns: {list(df.columns)}")
+        st.error("❌ 'Store Name' column not found.")
         return []
-    return sorted(df["Store Name"].dropna().unique())
+    return sorted(df["Store Name"].dropna().astype(str).unique())
 
-def get_subjects():
-    if "Subject" not in df.columns:
-        st.warning(f"⚠️ 'Subject' column not found. Available columns: {list(df.columns)}")
-        return []
-    return sorted(df["Subject"].dropna().unique())
-
-def generate_html_summary(grouped_df):
-    html = "<h3>Weekly Summary</h3>"
-    for subject, group in grouped_df:
-        html += f"<h4>{subject}</h4><ul>"
-        for _, row in group.iterrows():
-            notes = str(row.get("Notes", "")).strip().replace("\n", "<br>• ")
-            html += f"<li><strong>{row.get('Store Name', 'N/A')}:</strong> • {notes}</li>"
-        html += "</ul>"
-    return html
-
-# --- Password Protection ---
-password = st.text_input("Enter password to generate summary:", type="password")
-if password != "1234":
-    st.stop()
-
-# --- Filters ---
 store_options = get_store_names()
-subject_options = get_subjects()
 
-selected_week = st.selectbox("Select Week of the Year", sorted(df["Week of the Year"].dropna().unique(), reverse=True))
-filtered_df = df[df["Week of the Year"] == selected_week]
+# --- Streamlit App UI ---
+st.title("Weekly Construction Update")
 
-# --- Grouping ---
-grouped = filtered_df.groupby("Subject")
+selected_store = st.selectbox("Select a Store", store_options)
 
-# --- Display Summary ---
-st.subheader("📋 Summary Report")
-try:
-    summary_html = generate_html_summary(grouped)
-    st.markdown(summary_html, unsafe_allow_html=True)
-except Exception as e:
-    st.error(f"❌ Error generating summary: {e}")
+filtered_df = df[df["Store Name"].astype(str) == selected_store]
 
-# --- Raw Table View ---
-with st.expander("📄 View Raw Table"):
-    st.dataframe(filtered_df)
+st.dataframe(filtered_df)
+
+# Optional: Render additional metrics or summaries here
