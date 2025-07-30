@@ -48,15 +48,53 @@ date_cols = [col for col in df.columns if any(k in col for k in ["⚪ Baseline",
 for col in date_cols:
     df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%m/%d/%y')
 
-# Calculate deltas and flags
-try:
-    df['Store Opening Delta'] = (
-        pd.to_datetime(df['Store Opening'], errors='coerce') - pd.to_datetime(df['⚪ Baseline Store Opening'], errors='coerce')
-    ).dt.days
-    df['Flag'] = df['Store Opening Delta'].apply(lambda x: "Critical" if pd.notna(x) and x >= 5 else "")
-except:
-    df['Store Opening Delta'] = None
-    df['Flag'] = ""
+# --- Calculate Store Opening Delta and Flag ---
+df['⚪ Baseline Store Opening'] = pd.to_datetime(df['⚪ Baseline Store Opening'], errors='coerce')
+df['Store Opening'] = pd.to_datetime(df['Store Opening'], errors='coerce')
+
+# Calculate delta only when baseline date exists
+df['Store Opening Delta'] = df.apply(
+    lambda row: (row['Store Opening'] - row['⚪ Baseline Store Opening']).days
+    if pd.notna(row['⚪ Baseline Store Opening']) and pd.notna(row['Store Opening'])
+    else None,
+    axis=1
+)
+
+# Flag critical delays (delta >= 5)
+df['Flag'] = df['Store Opening Delta'].apply(lambda x: "Critical" if pd.notna(x) and x >= 5 else "")
+
+# --- Determine Trend Category ---
+trend_map = {}
+grouped = df.groupby('Store Name')
+for store, group in grouped:
+    group = group.sort_values('Year Week')
+    prev_date = None
+    for idx, row in group.iterrows():
+        current_date = row['Store Opening']
+        baseline_date = row['⚪ Baseline Store Opening']
+
+        if pd.isna(current_date):
+            trend_map[idx] = "🟡 Held"
+            continue
+
+        # Use ⚪ Baseline if exact match with baseline date
+        if pd.notna(baseline_date) and current_date == baseline_date:
+            trend_map[idx] = "⚪ Baseline"
+            continue
+
+        if prev_date is None:
+            trend_map[idx] = "🟡 Held"
+        else:
+            if current_date < prev_date:
+                trend_map[idx] = "🟢 Pulled In"
+            elif current_date > prev_date:
+                trend_map[idx] = "🔴 Pushed"
+            else:
+                trend_map[idx] = "🟡 Held"
+
+        prev_date = current_date
+
+df['Trend'] = df.index.map(trend_map)
 
 # Week info
 df['Year Week'] = df['Week of the Year'].astype(str)
@@ -104,10 +142,14 @@ def check_notes(text):
     return False
 
 df['Notes'] = df['Notes'].fillna("")
-df['Notes Filtered'] = df['Notes'].apply(lambda x: x if check_notes(x) else "see report below")
+def highlight_keyword(x):
+    return f"{x} <span style='color:red;'>*</span>" if check_notes(x) else "see report below"
 
-summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes Filtered']
+df['Notes Filtered'] = df['Notes'].apply(highlight_keyword)
+
+summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Store Opening Delta', 'Trend', 'Flag', 'Notes Filtered']
 summary_df = df[summary_cols].drop_duplicates(subset=['Store Name']).reset_index(drop=True)
+summary_df.rename(columns={'Notes Filtered': 'Notes'}, inplace=True)
 
 # Submission summary BEFORE password
 st.subheader("📋 Submitted Reports Overview")
@@ -120,13 +162,18 @@ st.dataframe(visible_df)
 st.subheader("🔐 Generate Weekly Summary Report")
 password = st.text_input("Enter Password", type="password")
 
-# Weekly trend summary chart
-trend_counts = summary_df['Trend'].value_counts().reindex(['🟢 Pulled In', '🔴 Pushed', '🟡 Held', '⚪ Baseline'], fill_value=0)
-colors = {'🟢 Pulled In': 'green', '🔴 Pushed': 'red', '🟡 Held': 'yellow', '⚪ Baseline': 'grey'}
 fig, ax = plt.subplots()
-ax.bar(trend_counts.index, trend_counts.values, color=[colors.get(x, 'grey') for x in trend_counts.index])
+bars = ax.bar(trend_counts.index, trend_counts.values, color=[colors.get(x, 'grey') for x in trend_counts.index])
 ax.set_ylabel("Count")
 ax.set_xlabel("Trend")
+
+# Annotate the bars with values (whole numbers)
+for bar in bars:
+    height = bar.get_height()
+    ax.annotate(f'{int(height)}', xy=(bar.get_x() + bar.get_width() / 2, height),
+                xytext=(0, 3), textcoords="offset points",
+                ha='center', va='bottom')
+    
 plt.tight_layout()
 
 def fig_to_base64(fig):
@@ -165,13 +212,24 @@ def generate_weekly_summary(df, summary_df, fig, password):
 
     group_col = "Subject" if "Subject" in df.columns else "Store Name"
     for group_name, group_df in df.groupby(group_col):
+    html.append(f"<h2>{group_name}</h2>")
+    
+    # Sort by Prototype
+    group_df = group_df.sort_values(by='Prototype')
+
+    for _, row in group_df.iterrows():
+        
         html.append(f"<h2>{group_name}</h2>")
         for _, row in group_df.iterrows():
             html.append('<div class="entry"><ul>')
-            html.append(f"<li><span class='label'>Store Name:</span> {row.get('Store Name', '')}</li>")
-            html.append(f"<li><span class='label'>Store Number:</span> {row.get('Store Number', '')}</li>")
-            html.append(f"<li><span class='label'>Prototype:</span> {row.get('Prototype', '')}</li>")
-            html.append(f"<li><span class='label'>CPM:</span> {row.get('CPM', '')}</li>")
+            
+            store_num = row.get('Store Number', '')
+            store_name = row.get('Store Name', '')
+            proto = row.get('Prototype', '')
+            cpm = row.get('CPM', '')
+            subject = row.get('Subject', 'EV Projects')
+
+            html.append(f"<div style='text-align:center; font-weight:bold; font-size:20px;'>{store_num} {store_name} - {subject} ({cpm})</div><br>")
 
             date_fields = ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening"]
             html.append("<li><span class='label'>Dates:</span><ul>")
