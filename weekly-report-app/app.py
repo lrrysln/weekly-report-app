@@ -14,7 +14,7 @@ creds = Credentials.from_service_account_info(
     st.secrets["gcp_service_account"], scopes=SCOPES
 )
 client = gspread.authorize(creds)
-sheet = client.open("Your Google Sheet Name").sheet1
+sheet = client.open("Construction Weekly Updates").sheet1
 
 # --- Helper Functions ---
 def get_current_year_week():
