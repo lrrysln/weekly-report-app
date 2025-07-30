@@ -142,6 +142,13 @@ st.dataframe(visible_df)
 st.subheader("🔐 Generate Weekly Summary Report")
 password = st.text_input("Enter Password", type="password")
 
+# Function to convert figure to base64
+def fig_to_base64(fig):
+    buf = BytesIO()
+    fig.savefig(buf, format="png", bbox_inches='tight')
+    buf.seek(0)
+    return base64.b64encode(buf.read()).decode()
+
 # Function to generate the report HTML
 def generate_report(df, summary_df, fig):
     img_base64 = fig_to_base64(fig)
@@ -188,4 +195,15 @@ def generate_report(df, summary_df, fig):
 
             # Dates Section
             date_fields = ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening"]
-            html.append("<li><span class='label'>Dates:</span><ul
+            html.append("<li><span class='label'>Dates:</span><ul>")
+            for field in date_fields:
+                val = row.get(field)
+                Baseline_val = row.get(f"⚪ Baseline {field}")
+                if pd.notna(Baseline_val) and val == Baseline_val:
+                    html.append(f"<li><b style='color:red;'> Baseline</b>: {field} - {val}</li>")
+                else:
+                    html.append(f"<li>{field}: {val}</li>")
+            html.append("</ul></li>")
+
+            # Notes Section
+            notes
