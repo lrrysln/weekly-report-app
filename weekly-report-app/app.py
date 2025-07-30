@@ -26,14 +26,14 @@ WORKSHEET_NAME = "Sheet1"
 @st.cache_data(ttl=600)
 def load_data():
     try:
-        st.write("⏳ Using Spreadsheet ID:", SPREADSHEET_ID)
+        # st.write("⏳ Using Spreadsheet ID:", SPREADSHEET_ID)
         sheet = client.open_by_key(SPREADSHEET_ID)
-        st.write("✅ Opened spreadsheet. Looking for worksheet:", WORKSHEET_NAME)
+        # st.write("✅ Opened spreadsheet. Looking for worksheet:", WORKSHEET_NAME)
         worksheet = sheet.worksheet(WORKSHEET_NAME)
-        st.write("✅ Worksheet found. Fetching records...")
+        # st.write("✅ Worksheet found. Fetching records...")
         records = worksheet.get_all_records()
         df = pd.DataFrame(records)
-        st.success("✅ Data loaded")
+        # st.success("✅ Data loaded")
         return df
     except Exception as e:
         st.error(f"Failed loading: {e}")
