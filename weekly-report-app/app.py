@@ -127,6 +127,7 @@ def highlight_keyword(x):
 
 df['Notes Filtered'] = df['Notes'].apply(highlight_keyword)
 
+# Filter the summary dataframe to remove unnecessary columns
 summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Store Opening Delta', 'Trend', 'Flag', 'Notes Filtered']
 summary_df = df[summary_cols].drop_duplicates(subset=['Store Name']).reset_index(drop=True)
 summary_df.rename(columns={'Notes Filtered': 'Notes'}, inplace=True)
@@ -142,14 +143,47 @@ st.dataframe(visible_df)
 st.subheader("🔐 Generate Weekly Summary Report")
 password = st.text_input("Enter Password", type="password")
 
-# Function to convert figure to base64
-def fig_to_base64(fig):
-    buf = BytesIO()
-    fig.savefig(buf, format="png", bbox_inches='tight')
-    buf.seek(0)
-    return base64.b64encode(buf.read()).decode()
+# Password verification and report generation
+if password == "1234":
+    if st.button("Generate Report"):
+        fig = plot_trends(df)  # This is where the trend plot is created
+        df, report_html = generate_report(df, summary_df, fig)
+        if df is not None:
+            st.markdown(report_html, unsafe_allow_html=True)
+else:
+    if password:
+        st.error("❌ Incorrect password.")
+# Function to plot trends (you might already have this code above)
+def plot_trends(df):
+    # Count the occurrences of each trend
+    trend_counts = df['Trend'].value_counts()
 
-# Function to generate the report HTML
+    # Define a color palette for the trends
+    colors = {
+        "🟡 Held": "yellow",
+        "⚪ Baseline": "gray",
+        "🟢 Pulled In": "green",
+        "🔴 Pushed": "red"
+    }
+
+    # Plotting the bar chart
+    fig, ax = plt.subplots()
+    bars = ax.bar(trend_counts.index, trend_counts.values, color=[colors.get(x, 'grey') for x in trend_counts.index])
+    ax.set_ylabel("Count")
+    ax.set_xlabel("Trend")
+
+    # Annotate the bars with values (whole numbers)
+    for bar in bars:
+        height = bar.get_height()
+        ax.annotate(f'{int(height)}', xy=(bar.get_x() + bar.get_width() / 2, height),
+                    xytext=(0, 3), textcoords="offset points",
+                    ha='center', va='bottom')
+
+    plt.tight_layout()
+
+    return fig
+
+# Function to generate report HTML
 def generate_report(df, summary_df, fig):
     img_base64 = fig_to_base64(fig)
     today = datetime.date.today()
@@ -175,35 +209,19 @@ def generate_report(df, summary_df, fig):
         "<hr>"
     ]
 
+    # Group by store name or subject, depending on what makes sense
     group_col = "Subject" if "Subject" in df.columns else "Store Name"
-    
-    for group_name, group_df in df.groupby(group_col):
-        html.append(f"<h2>{group_name}</h2>")
-        group_df = group_df.sort_values(by='Prototype')
+    for group, group_df in df.groupby(group_col):
+        html.append(f"<h2>{group}</h2>")
+        html.append(group_df.to_html(index=False))
 
-        for _, row in group_df.iterrows():
-            html.append('<div class="entry"><ul>')
+    html.append("</body></html>")
+    return df, "".join(html)
 
-            store_num = row.get('Store Number', '')
-            store_name = row.get('Store Name', '')
-            proto = row.get('Prototype', '')
-            cpm = row.get('CPM', '')
-            subject = row.get('Subject', 'EV Projects')
-
-            # Append store details in HTML
-            html.append(f"<div style='text-align:center; font-weight:bold; font-size:20px;'>{store_num} {store_name} - {subject} ({cpm})</div><br>")
-
-            # Dates Section
-            date_fields = ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening"]
-            html.append("<li><span class='label'>Dates:</span><ul>")
-            for field in date_fields:
-                val = row.get(field)
-                Baseline_val = row.get(f"⚪ Baseline {field}")
-                if pd.notna(Baseline_val) and val == Baseline_val:
-                    html.append(f"<li><b style='color:red;'> Baseline</b>: {field} - {val}</li>")
-                else:
-                    html.append(f"<li>{field}: {val}</li>")
-            html.append("</ul></li>")
-
-            # Notes Section
-            notes
+def fig_to_base64(fig):
+    """Convert matplotlib figure to base64 string."""
+    img_buffer = BytesIO()
+    fig.savefig(img_buffer, format='png')
+    img_buffer.seek(0)
+    img_base64 = base64.b64encode(img_buffer.read()).decode('utf-8')
+    return img_base64
