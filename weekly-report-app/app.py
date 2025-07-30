@@ -137,11 +137,13 @@ st.markdown(f"<h4><span style='color:red;'><b>{submitted_count}</b></span> form 
 visible_df = summary_df[['Store Number', 'Store Name', 'CPM', 'Prototype']]
 st.dataframe(visible_df)
 
-# --- Password Protection ---
+# --- Password Section ---
 st.subheader("🔐 Generate Weekly Summary Report")
+
+# Password input field
 password = st.text_input("Enter Password", type="password")
 
-# Fix: Button for submitting password and generating the report
+# Show submit button only after correct password
 if password == "1234":
     if st.button("Generate Report"):
         fig = plot_trends(df)
@@ -151,6 +153,7 @@ if password == "1234":
 else:
     if password:
         st.error("❌ Incorrect password.")
+
 # --- Plot Trends Function ---
 def plot_trends(df):
     # Count the occurrences of each trend
