@@ -105,7 +105,9 @@ df['Trend'] = df.index.map(trend_map)
 df['Flag'] = df['Store Opening Delta'].apply(lambda x: "Critical" if pd.notna(x) and x >= 5 else "")
 
 # Notes filter logic unchanged
-keywords = [ ... ]  # use your list
+keywords = [  "delay", "delayed", "issue", "problem", "risk", "concern", 
+    "escalate", "critical", "slip", "slipped", "pushed", "hold", 
+    "change", "reschedule", "blocker", "pending", "approval" ]  
 def check_notes(x): return any(kw in str(x).lower() for kw in keywords)
 df['Notes'] = df['Notes'].fillna("")
 df['Notes Filtered'] = df['Notes'].apply(lambda x: x if check_notes(x) else "see report below")
