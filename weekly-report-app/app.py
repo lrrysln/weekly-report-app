@@ -46,7 +46,6 @@ if df.empty:
 df.columns = [c.strip() for c in df.columns]
 
 # --- Data Preparation ---
-# Ensure 'Baseline' column exists in the data
 if 'Baseline' in df.columns:
     df['Baseline'] = pd.to_datetime(df['Baseline'], errors='coerce')
 else:
@@ -100,10 +99,6 @@ for store, group in grouped:
 
 df['Trend'] = df.index.map(trend_map)
 
-# Week info
-df['Year Week'] = df['Year Week'].astype(str)
-df = df.sort_values(by=['Store Name', 'Year Week'])
-
 # --- Notes Filtering ---
 keywords = ["behind schedule", "lagging", "delay", "critical path", "cpm impact", "work on hold", "stop work order",
             "reschedule", "off track", "schedule drifting", "missed milestone", "budget overrun", "cost impact",
@@ -140,16 +135,15 @@ st.dataframe(visible_df)
 # --- Password Section ---
 st.subheader("🔐 Generate Weekly Summary Report")
 
-# Password input field
 password = st.text_input("Enter Password", type="password")
 
 # Show submit button only after correct password
 if password == "1234":
-    st.session_state.password_valid = True  # Save password status in session state
+    st.session_state.password_valid = True
 else:
     st.session_state.password_valid = False
 
-# Show button only if password is correct
+# Only show the "Generate Report" button if the password is correct
 if st.session_state.password_valid:
     if st.button("Generate Report"):
         fig = plot_trends(df)
@@ -216,7 +210,6 @@ def generate_report(df, summary_df, fig):
         "<hr>"
     ]
 
-    # Group by store name or subject
     group_col = "Subject" if "Subject" in df.columns else "Store Name"
     for group_name, group_df in df.groupby(group_col):
         html.append(f"<h2>{group_name}</h2>")
@@ -232,5 +225,3 @@ def fig_to_base64(fig):
     img_buffer.seek(0)
     img_base64 = base64.b64encode(img_buffer.read()).decode('utf-8')
     return img_base64
-
-
