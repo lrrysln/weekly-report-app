@@ -45,7 +45,7 @@ if df.empty:
     st.warning("No data loaded")
     st.stop()
 
-# df.columns = [c.strip() for c in df.columns]
+df.columns = [c.strip() for c in df.columns]
 # st.write("DEBUG df.columns:", list(df.columns))
 
 # Ensure Baseline column exists and correct dtype
