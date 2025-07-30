@@ -146,10 +146,31 @@ st.dataframe(visible_df)
 st.subheader("🔐 Generate Weekly Summary Report")
 password = st.text_input("Enter Password", type="password")
 
+# Count the occurrences of each trend
+trend_counts = df['Trend'].value_counts()
+
+# Define a color palette for the trends
+colors = {
+    "🟡 Held": "yellow",
+    "⚪ Baseline": "gray",
+    "🟢 Pulled In": "green",
+    "🔴 Pushed": "red"
+}
+
+# Plotting the bar chart
 fig, ax = plt.subplots()
 bars = ax.bar(trend_counts.index, trend_counts.values, color=[colors.get(x, 'grey') for x in trend_counts.index])
 ax.set_ylabel("Count")
 ax.set_xlabel("Trend")
+
+# Annotate the bars with values (whole numbers)
+for bar in bars:
+    height = bar.get_height()
+    ax.annotate(f'{int(height)}', xy=(bar.get_x() + bar.get_width() / 2, height),
+                xytext=(0, 3), textcoords="offset points",
+                ha='center', va='bottom')
+
+plt.tight_layout()
 
 # Annotate the bars with values (whole numbers)
 for bar in bars:
