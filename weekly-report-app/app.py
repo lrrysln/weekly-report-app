@@ -14,12 +14,14 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive"
 ]
 
-# Ensure credentials are present in st.secrets
 if "gcp_service_account" not in st.secrets:
     st.error("Service account credentials not found in secrets.")
     st.stop()
 
-creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
+creds = Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"],
+    scopes=SCOPES
+)
 client = gspread.authorize(creds)
 
 SPREADSHEET_ID = "1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w"
@@ -36,39 +38,43 @@ def load_data():
         st.error(f"Failed to load data from Google Sheet: {e}")
         return pd.DataFrame()
 
+# --- Load and Clean Data ---
 df = load_data()
 
 if df.empty:
     st.warning("⚠️ No data loaded from Google Sheet yet.")
     st.stop()
+else:
+    st.success("✅ Data loaded successfully.")
 
-# Clean column names by removing spaces and special characters
 df.columns = [c.strip() for c in df.columns]
 
-# --- Data Preparation ---
-if 'Baseline' in df.columns:
-    df['Baseline'] = pd.to_datetime(df['Baseline'], errors='coerce')
+# --- Date Columns ---
+if 'Baseline' not in df.columns:
+    st.warning("'Baseline' column is missing from dataset. Creating empty.")
+    df['Baseline'] = pd.NaT
 else:
-    st.warning("'Baseline' column is missing from the dataset.")
-    df['Baseline'] = pd.NaT  # If missing, set the column to NaT (Not a Time)
+    df['Baseline'] = pd.to_datetime(df['Baseline'], errors='coerce')
 
-# Convert other date columns
 date_cols = [col for col in df.columns if any(k in col for k in ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening", "Start"])]
 for col in date_cols:
     df[col] = pd.to_datetime(df[col], errors='coerce')
 
-# --- Calculate Store Opening Delta and Flag ---
+# --- Calculate Delta & Flag ---
 df['Store Opening Delta'] = df.apply(
     lambda row: (row['Store Opening'] - row['Baseline']).days
-    if pd.notna(row['Baseline']) and pd.notna(row['Store Opening'])
-    else None,
+    if pd.notna(row['Store Opening']) and pd.notna(row['Baseline']) else None,
     axis=1
 )
 
 df['Flag'] = df['Store Opening Delta'].apply(lambda x: "Critical" if pd.notna(x) and x >= 5 else "")
 
-# --- Trend Calculation ---
+# --- Calculate Trends ---
 trend_map = {}
+if 'Year Week' not in df.columns:
+    st.warning("'Year Week' column is missing. Adding based on current date.")
+    df['Year Week'] = pd.to_datetime('today').isocalendar().week
+
 grouped = df.groupby('Store Name')
 for store, group in grouped:
     group = group.sort_values('Year Week')
@@ -76,16 +82,11 @@ for store, group in grouped:
     for idx, row in group.iterrows():
         current_date = row['Store Opening']
         baseline_date = row['Baseline']
-
         if pd.isna(current_date):
             trend_map[idx] = "🟡 Held"
-            continue
-
-        if pd.notna(baseline_date) and current_date == baseline_date:
+        elif pd.notna(baseline_date) and current_date == baseline_date:
             trend_map[idx] = "⚪ Baseline"
-            continue
-
-        if prev_date is None:
+        elif prev_date is None:
             trend_map[idx] = "🟡 Held"
         else:
             if current_date < prev_date:
@@ -94,7 +95,6 @@ for store, group in grouped:
                 trend_map[idx] = "🔴 Pushed"
             else:
                 trend_map[idx] = "🟡 Held"
-
         prev_date = current_date
 
 df['Trend'] = df.index.map(trend_map)
@@ -109,53 +109,48 @@ keywords = ["behind schedule", "lagging", "delay", "critical path", "cpm impact"
 
 def check_notes(text):
     text_lower = str(text).lower()
-    for kw in keywords:
-        if kw in text_lower:
-            return True
-    return False
+    return any(kw in text_lower for kw in keywords)
 
 df['Notes'] = df['Notes'].fillna("")
-def highlight_keyword(x):
-    return f"{x} <span style='color:red;'>*</span>" if check_notes(x) else "see report below"
+df['Notes Filtered'] = df['Notes'].apply(lambda x: x if check_notes(x) else "see report below")
 
-df['Notes Filtered'] = df['Notes'].apply(highlight_keyword)
-
-# --- Report Overview ---
+# --- Summary ---
 summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Store Opening Delta', 'Trend', 'Flag', 'Notes Filtered']
 summary_df = df[summary_cols].drop_duplicates(subset=['Store Name']).reset_index(drop=True)
 summary_df.rename(columns={'Notes Filtered': 'Notes'}, inplace=True)
 
-# --- Plot Trends Function ---
+# --- Trend Plot ---
 def plot_trends(df):
-    # Count the occurrences of each trend
     trend_counts = df['Trend'].value_counts()
+    if trend_counts.empty:
+        st.warning("No trend data to plot.")
+        return None
 
-    # Define a color palette for the trends
     colors = {
-        "🟡 Held": "yellow",
-        "⚪ Baseline": "gray",
         "🟢 Pulled In": "green",
-        "🔴 Pushed": "red"
+        "🔴 Pushed": "red",
+        "🟡 Held": "yellow",
+        "⚪ Baseline": "gray"
     }
 
-    # Plotting the bar chart
     fig, ax = plt.subplots()
     bars = ax.bar(trend_counts.index, trend_counts.values, color=[colors.get(x, 'grey') for x in trend_counts.index])
-    ax.set_ylabel("Count")
-    ax.set_xlabel("Trend")
-
-    # Annotate the bars with values (whole numbers)
     for bar in bars:
         height = bar.get_height()
-        ax.annotate(f'{int(height)}', xy=(bar.get_x() + bar.get_width() / 2, height),
-                    xytext=(0, 3), textcoords="offset points",
-                    ha='center', va='bottom')
-
+        ax.annotate(f"{int(height)}", (bar.get_x() + bar.get_width() / 2, height), ha="center", va="bottom")
+    ax.set_ylabel("Count")
+    ax.set_xlabel("Trend")
     plt.tight_layout()
-
     return fig
 
-# --- Function to Generate Report ---
+# --- Convert Figure to Base64 ---
+def fig_to_base64(fig):
+    buf = BytesIO()
+    fig.savefig(buf, format="png", bbox_inches='tight')
+    buf.seek(0)
+    return base64.b64encode(buf.read()).decode()
+
+# --- Generate Report ---
 def generate_report(df, summary_df, fig):
     img_base64 = fig_to_base64(fig)
     today = datetime.date.today()
@@ -171,7 +166,7 @@ def generate_report(df, summary_df, fig):
         "ul{margin:0;padding-left:20px}",
         ".label{font-weight:bold}",
         "table {border-collapse: collapse; width: 100%; text-align: center;}",
-        "th, td {border: 1px solid #ddd; padding: 8px; text-align: center;}",
+        "th, td {border: 1px solid #ddd; padding: 8px;}",
         "th {background-color: #f2f2f2;}",
         "</style></head><body>",
         f"<h1>{year} Week: {week_number} Weekly Summary Report</h1>",
@@ -187,13 +182,31 @@ def generate_report(df, summary_df, fig):
         html.append(group_df.to_html(index=False))
 
     html.append("</body></html>")
-    return df, "".join(html)
+    return "".join(html)
 
-def fig_to_base64(fig):
-    """Convert matplotlib figure to base64 string."""
-    img_buffer = BytesIO()
-    fig.savefig(img_buffer, format='png')
-    img_buffer.seek(0)
-    img_base64 = base64.b64encode(img_buffer.read()).decode('utf-8')
-    return img_base64
+# --- Password Input ---
+st.subheader("🔐 Generate Weekly Summary Report")
+password = st.text_input("Enter Password", type="password")
 
+# --- Button Logic ---
+if password:
+    if password == "1234":
+        st.success("✅ Password accepted.")
+        fig = plot_trends(summary_df)
+        if fig:
+            if st.button("Generate Report"):
+                report_html = generate_report(df, summary_df, fig)
+                st.markdown("### 📄 Weekly Summary")
+                st.components.v1.html(report_html, height=800, scrolling=True)
+                st.download_button(
+                    "Download Summary as HTML",
+                    data=report_html,
+                    file_name=f"Weekly_Summary_{datetime.datetime.now().strftime('%Y%m%d')}.html",
+                    mime="text/html"
+                )
+    else:
+        st.error("❌ Incorrect password.")
+
+# Optional: Display submitted overview table
+st.subheader("📋 Submitted Reports Overview")
+st.dataframe(summary_df[['Store Number', 'Store Name', 'CPM', 'Prototype']])
