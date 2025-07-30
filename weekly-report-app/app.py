@@ -25,7 +25,6 @@ client = gspread.authorize(creds)
 SPREADSHEET_ID = "1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w"
 WORKSHEET_NAME = "Sheet1"
 
-# --- Function to load data from Google Sheets ---
 @st.cache_data(ttl=600)
 def load_data():
     try:
@@ -126,35 +125,6 @@ summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Store Opening
 summary_df = df[summary_cols].drop_duplicates(subset=['Store Name']).reset_index(drop=True)
 summary_df.rename(columns={'Notes Filtered': 'Notes'}, inplace=True)
 
-# --- Submission Overview BEFORE password ---
-st.subheader("📋 Submitted Reports Overview")
-submitted_count = len(summary_df)
-st.markdown(f"<h4><span style='color:red;'><b>{submitted_count}</b></span> form responses have been submitted</h4>", unsafe_allow_html=True)
-visible_df = summary_df[['Store Number', 'Store Name', 'CPM', 'Prototype']]
-st.dataframe(visible_df)
-
-# --- Password Section ---
-st.subheader("🔐 Generate Weekly Summary Report")
-
-password = st.text_input("Enter Password", type="password")
-
-# Show submit button only after correct password
-if password == "1234":
-    st.session_state.password_valid = True
-else:
-    st.session_state.password_valid = False
-
-# Only show the "Generate Report" button if the password is correct
-if st.session_state.password_valid:
-    if st.button("Generate Report"):
-        fig = plot_trends(df)  # This should now be available and defined above
-        df, report_html = generate_report(df, summary_df, fig)
-        if df is not None:
-            st.markdown(report_html, unsafe_allow_html=True)
-else:
-    if password:
-        st.error("❌ Incorrect password.")
-
 # --- Plot Trends Function ---
 def plot_trends(df):
     # Count the occurrences of each trend
@@ -226,3 +196,4 @@ def fig_to_base64(fig):
     img_buffer.seek(0)
     img_base64 = base64.b64encode(img_buffer.read()).decode('utf-8')
     return img_base64
+
