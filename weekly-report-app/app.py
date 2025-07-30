@@ -187,11 +187,25 @@ def fig_to_base64(fig):
     buf.seek(0)
     return base64.b64encode(buf.read()).decode()
 
-# Generate the HTML report content
-def generate_weekly_summary(df, summary_df, fig, password):
-    if password != "1234":
+# Password input for generating the report
+st.subheader("🔐 Generate Weekly Summary Report")
+
+# Password input field
+password = st.text_input("Enter Password", type="password")
+
+# Only show the "Generate Report" button if the password is correct
+if password == "1234":
+    # Add the button to generate the report when password is correct
+    if st.button("Generate Report"):
+        # Your report generation logic goes here
+        df, report_html = generate_weekly_summary(df, summary_df, fig, password)
+        if df is not None:
+            st.markdown(report_html, unsafe_allow_html=True)
+else:
+    # If the password is incorrect, show an error message
+    if password:
         st.error("❌ Incorrect password.")
-        return None, ""
+
     
     img_base64 = fig_to_base64(fig)
     today = datetime.date.today()
