@@ -153,7 +153,7 @@ def generate_weekly_summary(df, summary_df, fig, password):
         "th {background-color: #f2f2f2;}",
         "</style></head><body>",
         f"<h1>{year} Week: {week_number} Weekly Summary Report</h1>",
-        f'<img src="data:image/png;base64,{img_base64}" style="max-width:600px; display:block; margin:auto;">",
+        f'<img src="data:image/png;base64,{img_base64}" style="max-width:600px; display:block; margin:auto;">'
         "<h2>Executive Summary</h2>",
         summary_df.to_html(index=False, escape=False),
         "<hr>"
