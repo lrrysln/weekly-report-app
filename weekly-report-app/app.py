@@ -1,15 +1,3 @@
-Absolutely! Here's your fully updated Streamlit script with the proper use of `open_by_key` and your spreadsheet ID assigned correctly. It includes:
-
-* Auth setup using `st.secrets` for your service account
-* Reading the Google Sheet by spreadsheet ID and worksheet name
-* Populating the "Store Name" dropdown dynamically from your sheet data
-* Single baseline toggle applying to all date fields
-* Executive summary table & chart logic as you requested
-* Password-protected HTML summary generation
-
----
-
-```python
 import streamlit as st
 import pandas as pd
 import datetime
@@ -47,22 +35,22 @@ df = load_data()
 if df.empty:
     st.stop()
 
-# --- Clean column names (strip spaces) ---
+# Clean column names (strip spaces)
 df.columns = [c.strip() for c in df.columns]
 
-# --- Format date columns to MM/DD/YY ---
+# Format date columns to MM/DD/YY
 date_cols = [col for col in df.columns if any(k in col for k in ["Baseline", "TCO", "Walk", "Turnover", "Open to Train", "Store Opening", "Start"])]
 for col in date_cols:
     df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%m/%d/%y')
 
-# --- Get Store Names for Dropdown ---
+# Get Store Names for Dropdown
 store_options = sorted(df["Store Name"].dropna().unique())
 
-# --- Sidebar: Add New Project (No writeback per your update) ---
+# Sidebar message about adding new projects manually
 st.sidebar.title("Add New Project")
 st.sidebar.write("Please update new projects manually in the Google Sheet.")
 
-# --- Main Form ---
+# Main Form
 st.title("📝 Weekly Construction Update")
 
 with st.form("weekly_update_form", clear_on_submit=True):
@@ -77,7 +65,7 @@ with st.form("weekly_update_form", clear_on_submit=True):
 
     baseline_toggle = st.checkbox("Baseline Dates for All Milestones")
 
-    # Date inputs; decide column based on baseline_toggle when saving
+    # Date inputs
     tco_date = st.date_input("TCO Date")
     ops_walk_date = st.date_input("Ops Walk Date")
     turnover_date = st.date_input("Turnover Date")
@@ -91,21 +79,12 @@ with st.form("weekly_update_form", clear_on_submit=True):
     if submitted:
         st.success("Submission received! (Note: Manual update to Google Sheet required)")
 
-# --- Calculate Executive Summary ---
-
-# Calculate 'Store Opening Delta' (days difference baseline vs current)
+# Helper to parse dates
 def parse_date(d):
     try:
         return pd.to_datetime(d, errors='coerce')
     except:
         return pd.NaT
-
-def get_date_for_row(row, field):
-    # Returns baseline date if baseline fields have data, else current date
-    baseline_field = f"Baseline {field}"
-    if baseline_toggle or (baseline_field in df.columns and pd.notna(row.get(baseline_field)) and str(row.get(baseline_field)).strip() != ''):
-        return parse_date(row.get(baseline_field))
-    return parse_date(row.get(field))
 
 df['Baseline Store Opening Date'] = df.apply(lambda r: parse_date(r.get("Baseline Store Opening")), axis=1)
 df['Current Store Opening Date'] = df.apply(lambda r: parse_date(r.get("Store Opening")), axis=1)
@@ -115,17 +94,10 @@ df['Store Opening Delta'] = (df['Current Store Opening Date'] - df['Baseline Sto
 df['Flag'] = df['Store Opening Delta'].apply(lambda x: "Critical" if pd.notna(x) and x >= 5 else "")
 
 # Trend Calculation
-# For trend, compare current Store Opening date this week to previous week (if available)
-# We infer week by "Week of the Year" and "Year" in that column (e.g. '2025 Week 30')
-# We'll sort data by Store Name and Week and calculate trend for each store across weeks
-
 df['Year Week'] = df['Week of the Year'].astype(str)
-
 df = df.sort_values(by=['Store Name', 'Year Week'])
 
-# Create a helper DataFrame with Store Opening Dates per Store per Week
 trend_map = {}
-
 grouped = df.groupby('Store Name')
 
 for store, group in grouped:
@@ -149,7 +121,7 @@ for store, group in grouped:
 
 df['Trend'] = df.index.map(trend_map)
 
-# Notes filter - keywords from your list
+# Notes filter - keywords list
 keywords = [
     "behind schedule", "lagging", "falling behind", "delay", "delayed", "unavoidable delay", "force majeure",
     "time extension request", "extended duration", "critical path", "cpm impact", "float erosion",
@@ -179,8 +151,7 @@ def check_notes(text):
 
 df['Notes Filtered'] = df['Notes'].apply(lambda x: x if check_notes(x) else "see report below")
 
-# --- Executive Summary Table ---
-
+# Executive Summary Table
 summary_cols = [
     'Store Name',
     'Flag',
@@ -191,7 +162,7 @@ summary_cols = [
 
 summary_df = df[summary_cols].drop_duplicates(subset=['Store Name']).reset_index(drop=True)
 
-# --- Plot bar chart for trend counts ---
+# Plot bar chart for trend counts
 trend_counts = summary_df['Trend'].value_counts().reindex(['pulled in', 'pushed', 'held'], fill_value=0)
 
 fig, ax = plt.subplots()
@@ -202,11 +173,11 @@ ax.set_ylabel("Count")
 ax.set_xlabel("Trend")
 st.pyplot(fig)
 
-# --- Display Executive Summary Table ---
+# Display Executive Summary Table
 st.subheader("Executive Summary Table")
 st.dataframe(summary_df.style.format({"Store Opening Delta": "{:.0f}"}))
 
-# --- Weekly Summary HTML Generator ---
+# Weekly Summary HTML Generator
 def generate_weekly_summary(df, password):
     if password != "1234":
         return None, "❌ Incorrect password."
@@ -239,7 +210,7 @@ def generate_weekly_summary(df, password):
             html.append(f"<li><span class='label'>Store Number:</span> {row.get('Store Number', '')}</li>")
             html.append(f"<li><span class='label'>Prototype:</span> {row.get('Prototype', '')}</li>")
 
-            # Dates: show baseline date if exists else regular date, excluding duplicates
+            # Dates: show baseline date if exists else regular date
             date_fields = ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening"]
             html.append("<li><span class='label'>Dates:</span><ul>")
             for field in date_fields:
@@ -260,8 +231,7 @@ def generate_weekly_summary(df, password):
     html.append("</body></html>")
     return df, "".join(html)
 
-
-# --- Generate Weekly Summary Report ---
+# Generate Weekly Summary Report
 st.subheader("🔐 Generate Weekly Summary Report")
 password = st.text_input("Enter Password", type="password")
 if st.button("Generate Report"):
@@ -271,5 +241,9 @@ if st.button("Generate Report"):
         st.components.v1.html(html, height=800, scrolling=True)
         st.download_button(
             "Download Summary as HTML",
-           
-```
+            data=html,
+            file_name=f"Weekly_Summary_{datetime.datetime.now().strftime('%Y%m%d')}.html",
+            mime="text/html"
+        )
+    else:
+        st.error(html)
