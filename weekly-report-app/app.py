@@ -145,6 +145,12 @@ password = st.text_input("Enter Password", type="password")
 
 # Show submit button only after correct password
 if password == "1234":
+    st.session_state.password_valid = True  # Save password status in session state
+else:
+    st.session_state.password_valid = False
+
+# Show button only if password is correct
+if st.session_state.password_valid:
     if st.button("Generate Report"):
         fig = plot_trends(df)
         df, report_html = generate_report(df, summary_df, fig)
@@ -212,11 +218,19 @@ def generate_report(df, summary_df, fig):
 
     # Group by store name or subject
     group_col = "Subject" if "Subject" in df.columns else "Store Name"
-
     for group_name, group_df in df.groupby(group_col):
         html.append(f"<h2>{group_name}</h2>")
         html.append(group_df.to_html(index=False))
 
     html.append("</body></html>")
     return df, "".join(html)
+
+def fig_to_base64(fig):
+    """Convert matplotlib figure to base64 string."""
+    img_buffer = BytesIO()
+    fig.savefig(img_buffer, format='png')
+    img_buffer.seek(0)
+    img_base64 = base64.b64encode(img_buffer.read()).decode('utf-8')
+    return img_base64
+
 
