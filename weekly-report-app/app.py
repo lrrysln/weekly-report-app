@@ -209,7 +209,7 @@ def generate_weekly_summary(df, summary_df, fig, password):
             store_num = row.get('Store Number', '')
             store_name = row.get('Store Name', '')
             proto = row.get('Prototype', '')
-                        cpm = row.get('CPM', '')
+            cpm = row.get('CPM', '')
             subject = row.get('Subject', 'EV Projects')
 
             # Append store details in HTML
