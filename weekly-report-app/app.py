@@ -45,9 +45,7 @@ if df.empty:
 # Clean column names by removing spaces and special characters
 df.columns = [c.strip() for c in df.columns]
 
-# Ensure the column names are as expected (for debugging)
-st.write(df.columns)
-
+# --- Data Preparation ---
 # Ensure 'Baseline' column exists in the data
 if 'Baseline' in df.columns:
     df['Baseline'] = pd.to_datetime(df['Baseline'], errors='coerce')
@@ -70,7 +68,7 @@ df['Store Opening Delta'] = df.apply(
 
 df['Flag'] = df['Store Opening Delta'].apply(lambda x: "Critical" if pd.notna(x) and x >= 5 else "")
 
-# --- Determine Trend Category ---
+# --- Trend Calculation ---
 trend_map = {}
 grouped = df.groupby('Store Name')
 for store, group in grouped:
@@ -106,7 +104,7 @@ df['Trend'] = df.index.map(trend_map)
 df['Year Week'] = df['Year Week'].astype(str)
 df = df.sort_values(by=['Store Name', 'Year Week'])
 
-# Filter notes
+# --- Notes Filtering ---
 keywords = ["behind schedule", "lagging", "delay", "critical path", "cpm impact", "work on hold", "stop work order",
             "reschedule", "off track", "schedule drifting", "missed milestone", "budget overrun", "cost impact",
             "change order pending", "claim submitted", "dispute", "litigation risk", "schedule variance",
@@ -127,33 +125,33 @@ def highlight_keyword(x):
 
 df['Notes Filtered'] = df['Notes'].apply(highlight_keyword)
 
-# Filter the summary dataframe to remove unnecessary columns
+# --- Report Overview ---
 summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Store Opening Delta', 'Trend', 'Flag', 'Notes Filtered']
 summary_df = df[summary_cols].drop_duplicates(subset=['Store Name']).reset_index(drop=True)
 summary_df.rename(columns={'Notes Filtered': 'Notes'}, inplace=True)
 
-# Submission summary BEFORE password
+# --- Submission Overview BEFORE password ---
 st.subheader("📋 Submitted Reports Overview")
 submitted_count = len(summary_df)
 st.markdown(f"<h4><span style='color:red;'><b>{submitted_count}</b></span> form responses have been submitted</h4>", unsafe_allow_html=True)
 visible_df = summary_df[['Store Number', 'Store Name', 'CPM', 'Prototype']]
 st.dataframe(visible_df)
 
-# Password section
+# --- Password Protection ---
 st.subheader("🔐 Generate Weekly Summary Report")
 password = st.text_input("Enter Password", type="password")
 
-# Password verification and report generation
+# Fix: Button for submitting password and generating the report
 if password == "1234":
     if st.button("Generate Report"):
-        fig = plot_trends(df)  # This is where the trend plot is created
+        fig = plot_trends(df)
         df, report_html = generate_report(df, summary_df, fig)
         if df is not None:
             st.markdown(report_html, unsafe_allow_html=True)
 else:
     if password:
         st.error("❌ Incorrect password.")
-# Function to plot trends (you might already have this code above)
+# --- Plot Trends Function ---
 def plot_trends(df):
     # Count the occurrences of each trend
     trend_counts = df['Trend'].value_counts()
@@ -183,7 +181,7 @@ def plot_trends(df):
 
     return fig
 
-# Function to generate report HTML
+# --- Function to Generate Report ---
 def generate_report(df, summary_df, fig):
     img_base64 = fig_to_base64(fig)
     today = datetime.date.today()
@@ -209,19 +207,13 @@ def generate_report(df, summary_df, fig):
         "<hr>"
     ]
 
-    # Group by store name or subject, depending on what makes sense
+    # Group by store name or subject
     group_col = "Subject" if "Subject" in df.columns else "Store Name"
-    for group, group_df in df.groupby(group_col):
-        html.append(f"<h2>{group}</h2>")
+
+    for group_name, group_df in df.groupby(group_col):
+        html.append(f"<h2>{group_name}</h2>")
         html.append(group_df.to_html(index=False))
 
     html.append("</body></html>")
     return df, "".join(html)
 
-def fig_to_base64(fig):
-    """Convert matplotlib figure to base64 string."""
-    img_buffer = BytesIO()
-    fig.savefig(img_buffer, format='png')
-    img_buffer.seek(0)
-    img_base64 = base64.b64encode(img_buffer.read()).decode('utf-8')
-    return img_base64
