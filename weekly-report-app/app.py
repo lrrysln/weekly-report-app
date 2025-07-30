@@ -107,7 +107,7 @@ for store, group in grouped:
 df['Trend'] = df.index.map(trend_map)
 
 # Week info
-df['Year Week'] = df['Week of the Year'].astype(str)
+df['Year Week'] = df['Year Week'].astype(str)
 df = df.sort_values(by=['Store Name', 'Year Week'])
 
 # Filter notes
