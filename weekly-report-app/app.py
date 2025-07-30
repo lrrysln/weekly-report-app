@@ -161,6 +161,7 @@ def fig_to_base64(fig):
     buf.seek(0)
     return base64.b64encode(buf.read()).decode()
 
+# Generate the HTML report content
 def generate_weekly_summary(df, summary_df, fig, password):
     if password != "1234":
         st.error("❌ Incorrect password.")
@@ -206,5 +207,26 @@ def generate_weekly_summary(df, summary_df, fig, password):
 
             html.append(f"<div style='text-align:center; font-weight:bold; font-size:20px;'>{store_num} {store_name} - {subject} ({cpm})</div><br>")
 
+            # Fixed the unterminated string literal
             date_fields = ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening"]
-            html.append("<li><span class='label'>Dates:</span><ul
+            html.append("<li><span class='label'>Dates:</span><ul>")  # <-- fixed line
+            for field in date_fields:
+                val = row.get(field)
+                Baseline_val = row.get(f"⚪ Baseline {field}")
+                if pd.notna(Baseline_val) and val == Baseline_val:
+                    html.append(f"<li><b style='color:red;'> Baseline</b>: {field} - {val}</li>")
+                else:
+                    html.append(f"<li>{field}: {val}</li>")
+            html.append("</ul></li>")
+
+            notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
+            if notes:
+                html.append("<li><span class='label'>Notes:</span><ul>")
+                html += [f"<li>{n}</li>" for n in notes]
+                html.append("</ul></li>")
+
+            html.append("</ul></div>")
+
+    html.append("</body></html>")
+    return df, "".join(html)
+
