@@ -74,7 +74,7 @@ for store, grp in df.groupby('Store Name'):
         cur = row['Store Opening']
         is_base = bool(row['Baseline'])
         if is_base:
-            trend_map[idx] = "N/A"
+            trend_map[idx] = "⚪ Baseline"
             delta_map[idx] = 0
         else:
             baseline_date = baseline_date_by_store.get(store)
