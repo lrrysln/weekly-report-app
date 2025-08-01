@@ -121,7 +121,6 @@ st.dataframe(visible_df)
 # Password section
 st.subheader("🔐 Generate Weekly Summary Report")
 password = st.text_input("Enter Password", type="password")
-st.write("Password entered:", password)  # Debug print
 
 # Weekly trend summary chart
 trend_counts = summary_df['Trend'].value_counts().reindex(['🟢 Pulled In', '🔴 Pushed', '🟡 Held', '⚪ Baseline'], fill_value=0)
@@ -175,7 +174,7 @@ def generate_weekly_summary(df, summary_df, fig, password):
                 html.append('<div class="entry"><ul>')
 
                 # Combined store info on one line
-                store_info = f"{row.get('Store Number', '')} - {row.get('Store Name', '')}, {row.get('Prototype', '')} (CPM: {row.get('CPM', '')})"
+                store_info = f"{row.get('Store Number', '')} - {row.get('Store Name', '')}, {row.get('Prototype', '')} ({row.get('CPM', '')})"
                 html.append(f"<li><b class='header'>{store_info}</b></li>")
 
                 # Dates section
