@@ -83,24 +83,25 @@ for store, grp in df.groupby('Store Name'):
             else:
                 delta_map[idx] = None
 
-        # For trend (non-baseline): compare to previous date in this group
-        prev_idx = grp.index[grp.index.get_loc(idx) - 1] if grp.index.get_loc(idx) > 0 else None
-        if is_base:
-            pass
-        elif prev_idx is not None:
-            prev_date = grp.loc[prev_idx, 'Store Opening']
-            if pd.isna(cur):
-                trend_map[idx] = "🟡 Held"
-            elif cur < prev_date:
-                trend_map[idx] = "🟢 Pulled In"
-            elif cur > prev_date:
-                trend_map[idx] = "🔴 Pushed"
-            elif cur > prev_date:
-                trend_map[idx] = "⚪ Baseline"
-            else:
-                trend_map[idx] = "NA"
-        else:
-            trend_map[idx] = "NA"
+       # For trend (non-baseline): compare to previous date in this group
+prev_idx = grp.index[grp.index.get_loc(idx) - 1] if grp.index.get_loc(idx) > 0 else None
+
+if is_base:
+    trend_map[idx] = "⚪ Baseline"
+elif prev_idx is not None:
+    prev_date = grp.loc[prev_idx, 'Store Opening']
+    if pd.isna(cur):
+        trend_map[idx] = "🟡 Held"
+    elif cur < prev_date:
+        trend_map[idx] = "🟢 Pulled In"
+    elif cur > prev_date:
+        trend_map[idx] = "🔴 Pushed"
+    else:
+        trend_map[idx] = "🟡 Held"
+else:
+    # This handles first record with no baseline flag — treat as baseline
+    trend_map[idx] = "⚪ Baseline"
+
 
 df['Store Opening Delta'] = df.index.map(delta_map)
 df['Trend'] = df.index.map(trend_map)
