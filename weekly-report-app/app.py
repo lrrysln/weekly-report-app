@@ -149,40 +149,38 @@ def generate_weekly_summary(df, summary_df, fig, password):
         "body{font-family:Arial;padding:20px}",
         "h1{text-align:center}",
         "h2{background:#cce5ff;padding:10px;border-radius:4px}",
-        ".entry{border:1px solid #ccc;padding:10px;margin:10px 0;border-radius:4px;background:#f9f9f9}",
         "ul{margin:0;padding-left:20px}",
-        ".label{font-weight:bold}",
-        "table {border-collapse: collapse; width: 100%; text-align: center;}",
-        "th, td {border: 1px solid #ddd; padding: 8px; text-align: center;}",
-        "th {background-color: #f2f2f2;}",
+        "b.header{font-size:1.2em; display:block; margin-top:15px;}",
         "</style></head><body>",
         f"<h1>{year} Week: {week_number} Weekly Summary Report</h1>",
         f'<img src="data:image/png;base64,{img_base64}" style="max-width:600px; display:block; margin:auto;">',
         "<h2>Executive Summary</h2>",
         summary_df.to_html(index=False, escape=False),
-        "<hr>"
+        "<hr><h2>Site Notes</h2>"
     ]
 
+    # Grouping by Subject or Store Name
     group_col = "Subject" if "Subject" in df.columns else "Store Name"
     for group_name, group_df in df.groupby(group_col):
         html.append(f"<h2>{group_name}</h2>")
         for _, row in group_df.iterrows():
-            html.append('<div class="entry"><ul>')
-            html.append(f"<li><span class='label'>Store Name:</span> {row.get('Store Name', '')}</li>")
-            html.append(f"<li><span class='label'>Store Number:</span> {row.get('Store Number', '')}</li>")
-            html.append(f"<li><span class='label'>Prototype:</span> {row.get('Prototype', '')}</li>")
-            html.append(f"<li><span class='label'>CPM:</span> {row.get('CPM', '')}</li>")
+            store_number = row.get("Store Number", "")
+            store_name = row.get("Store Name", "")
+            prototype = row.get("Prototype", "")
+            cpm = row.get("CPM", "")
+            header = f"<b class='header'>{store_number} - {store_name}, {prototype} ({cpm})</b>"
 
-            date_fields = ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening"]
-            html.append("<li><span class='label'>Dates:</span><ul>")
-            for field in date_fields:
-                val = row.get(field)
-                Baseline_val = row.get(f"⚪ Baseline {field}")
-                if pd.notna(Baseline_val) and val == Baseline_val:
-                    html.append(f"<li><b style='color:red;'> Baseline</b>: {field} - {val}</li>")
-                else:
-                    html.append(f"<li>{field}: {val}</li>")
-            html.append("</ul></li>")
+            bullet_fields = ["Start", "TCO", "Turnover", " Notes"]
+            bullet_items = []
+            for field in bullet_fields:
+                val = row.get(field, "")
+                if pd.notna(val) and str(val).strip():
+                    bullet_items.append(f"<li>{val}</li>")
+
+            html.append(f"{header}<ul>{''.join(bullet_items)}</ul>")
+
+    html.append("</body></html>")
+    return df, "".join(html)
 
             notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
             if notes:
