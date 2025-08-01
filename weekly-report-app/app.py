@@ -59,7 +59,7 @@ except:
     df['Flag'] = ""
 
 # Week info
-df['Year Week'] = df['Week of the Year'].astype(str)
+df['Year Week'] = df['Week Year'].astype(str)
 df = df.sort_values(by=['Store Name', 'Year Week'])
 
 trend_map = {}
