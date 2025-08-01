@@ -95,10 +95,12 @@ for store, grp in df.groupby('Store Name'):
                 trend_map[idx] = "🟢 Pulled In"
             elif cur > prev_date:
                 trend_map[idx] = "🔴 Pushed"
+            elif cur > prev_date:
+                trend_map[idx] = "⚪ Baseline"
             else:
-                trend_map[idx] = "🟡 Held"
+                trend_map[idx] = "NA"
         else:
-            trend_map[idx] = "🟡 Held"
+            trend_map[idx] = "NA"
 
 df['Store Opening Delta'] = df.index.map(delta_map)
 df['Trend'] = df.index.map(trend_map)
