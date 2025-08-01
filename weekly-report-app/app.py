@@ -62,21 +62,23 @@ except:
 df['Year Week'] = df['Year Week'].astype(str)
 df = df.sort_values(by=['Store Name', 'Year Week'])
 
+# Calculate trend correctly using Store Number
 trend_map = {}
-grouped = df.groupby('Store Name')
+grouped = df.groupby('Store Number')
 for store, group in grouped:
     group = group.sort_values('Year Week')
     prev_date = None
     for idx, row in group.iterrows():
         current_date = pd.to_datetime(row.get("Store Opening"), errors='coerce')
-        Baseline_date = pd.to_datetime(row.get("⚪ Baseline Store Opening"), errors='coerce')
+        baseline_date = pd.to_datetime(row.get("⚪ Baseline Store Opening", None), errors='coerce')
+        
         if pd.isna(current_date):
             trend_map[idx] = "🟡 Held"
             continue
-        if pd.notna(Baseline_date) and current_date == Baseline_date:
+
+        if pd.notna(baseline_date) and current_date == baseline_date:
             trend_map[idx] = "⚪ Baseline"
-            continue
-        if prev_date is None:
+        elif prev_date is None:
             trend_map[idx] = "🟡 Held"
         else:
             if current_date < prev_date:
@@ -85,8 +87,11 @@ for store, group in grouped:
                 trend_map[idx] = "🔴 Pushed"
             else:
                 trend_map[idx] = "🟡 Held"
+
         prev_date = current_date
+
 df['Trend'] = df.index.map(trend_map)
+
 
 # Filter notes
 keywords = [
