@@ -159,7 +159,6 @@ def generate_weekly_summary(df, summary_df, fig, password):
         "<hr><h2>Site Notes</h2>"
     ]
 
-    # Grouping by Subject or Store Name
     group_col = "Subject" if "Subject" in df.columns else "Store Name"
     for group_name, group_df in df.groupby(group_col):
         html.append(f"<h2>{group_name}</h2>")
@@ -178,17 +177,6 @@ def generate_weekly_summary(df, summary_df, fig, password):
                     bullet_items.append(f"<li>{val}</li>")
 
             html.append(f"{header}<ul>{''.join(bullet_items)}</ul>")
-
-    html.append("</body></html>")
-    return df, "".join(html)
-
-            notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
-            if notes:
-                html.append("<li><span class='label'>Notes:</span><ul>")
-                html += [f"<li>{n}</li>" for n in notes]
-                html.append("</ul></li>")
-
-            html.append("</ul></div>")
 
     html.append("</body></html>")
     return df, "".join(html)
