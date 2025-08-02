@@ -24,8 +24,8 @@ st.set_page_config(layout="wide", page_title="Weekly Construction Report")
 
 # --- Load Sheet ---
 SPREADSHEET_NAME = "Construction Weekly Updates"
-WORKSHEET_NAME = "Form Responses 1"
-sheet = client.open(SPREADSHEET_NAME).worksheet(WORKSHEET_NAME)
+WORKSHEET_NAME = "Sheet1"
+sheet = client.open(Construction Weekly Updates).worksheet(Sheet1)
 data = pd.DataFrame(sheet.get_all_records())
 
 # --- Clean & Process Data ---
