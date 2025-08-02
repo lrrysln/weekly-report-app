@@ -10,70 +10,67 @@ from io import BytesIO
 import json
 import re
 
-# --- Auth & Google Sheets Setup ---
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
 
-creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
+
+# --- Google Sheets Auth ---
+secrets = st.secrets
+info = json.loads(secrets["GOOGLE_CREDENTIALS"])
+creds = service_account.Credentials.from_service_account_info(
+    info,
+    scopes=["https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"]
+)
 client = gspread.authorize(creds)
 
-# --- Config ---
-st.set_page_config(layout="wide", page_title="Weekly Construction Report")
+# --- Sheet Info ---
+SPREADSHEET_NAME = "Construction Weekly Updates"
+worksheet = client.open(SPREADSHEET_NAME).sheet1
 
-# --- Load Sheet ---
-SPREADSHEET_ID = "1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w"
-WORKSHEET_NAME = "Sheet1"
+# --- Load Data from Google Sheet ---
+data = worksheet.get_all_records()
+df = pd.DataFrame(data)
 
-@st.cache_data(ttl=600)
-def load_data():
-    try:
-        sheet = client.open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET_NAME)
-        data = sheet.get_all_records()
-        df = pd.DataFrame(data)
-        return df
-    except Exception as e:
-        st.error(f"Failed to load data from Google Sheet: {e}")
-        return pd.DataFrame()
-
-df = load_data()
-
-if df.empty:
-    st.warning("⚠️ No data loaded from Google Sheet yet.")
-    st.stop()
-
-df.columns = df.columns.str.strip()
-
-# --- Parse 'Baseline' column if it exists ---
-if "Baseline" in df.columns:
-    # Split Baseline into 'Baseline Date' and 'Is Baseline' using the slash as delimiter
-    split_baseline = df["Baseline"].astype(str).str.split("/", expand=True)
-    df["Baseline Date"] = pd.to_datetime(split_baseline[0], errors="coerce")
-    df["Is Baseline"] = split_baseline[1].fillna("").str.strip().str.lower() == "true"
-
+# --- Convert "Year Week" to datetime, then extract Year/Week ---
 if "Year Week" in df.columns:
-    # --- Clean & Process Data ---
-    # Convert your timestamp string to datetime object
-    df["Timestamp"] = pd.to_datetime(df["Year Week"], errors='coerce')
-
-    # Extract year and week number
-    df["Year"] = df["Timestamp"].dt.year
-    df["Week"] = df["Timestamp"].dt.isocalendar().week
-
-# Ensure Delta Days is numeric
-df["Delta Days"] = pd.to_numeric(df["Delta Days"], errors="coerce").fillna(0)
-
-# Sort data first to ensure proper diff calculation
-df = df.sort_values(["Store Number", "Timestamp"])
-
-# Calculate Trend per Store Number over time
-df["Trend"] = df.groupby("Store Number")["Delta Days"].diff().fillna(0)
-
-
+    df["Year Week"] = pd.to_datetime(df["Year Week"], errors='coerce')
+    df["Year"] = df["Year Week"].dt.isocalendar().year
+    df["Week"] = df["Year Week"].dt.isocalendar().week
 else:
-    st.error("'Year Week' column not found in data")
+    st.error("'Year Week' column not found.")
     st.stop()
+
+# --- Handle date columns ---
+date_columns = ["Baseline", "Start", "TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening"]
+for col in date_columns:
+    if col in df.columns:
+        df[col] = pd.to_datetime(df[col], errors="coerce")
+
+# --- Sort and calculate Delta Days and Trend ---
+df.sort_values(["Store Name", "Year", "Week"], inplace=True)
+df["Delta Days"] = 0.0
+df["Trend"] = 0.0
+
+for store in df["Store Name"].unique():
+    store_df = df[df["Store Name"] == store]
+    prev_row = None
+
+    for idx, row in store_df.iterrows():
+        if pd.notnull(row["Store Opening"]) and prev_row is not None and pd.notnull(prev_row["Store Opening"]):
+            delta = (row["Store Opening"] - prev_row["Store Opening"]).days
+            df.at[idx, "Delta Days"] = delta
+            if delta > 0:
+                df.at[idx, "Trend"] = 1
+            elif delta < 0:
+                df.at[idx, "Trend"] = -1
+        prev_row = row
+
+# --- Show preview ---
+st.title("Weekly Construction Report Dashboard")
+st.dataframe(df)
+
+# --- Optional: Save cleaned data to a CSV or Excel ---
+# df.to_csv("cleaned_updates.csv", index=False)
+
 
 # --- Plotting ---
 def create_summary_chart(df):
