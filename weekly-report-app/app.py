@@ -52,7 +52,7 @@ df['Store Number'] = df['Store Number'].astype(str).str.strip()
 baseline_df = df[df['Baseline'] == "/True"].copy()
 baseline_map = baseline_df.set_index('Store Number')['Store Opening'].to_dict()
 
-# Trend calculation (using your working method)
+# Trend calculation
 def compute_trend(row):
     store_number = row['Store Number']
     current_open = row['Store Opening']
@@ -109,46 +109,41 @@ st.dataframe(visible_df)
 st.subheader("🔐 Generate Weekly Summary Report")
 password = st.text_input("Enter Password", type="password")
 
-# Weekly trend summary chart
-trend_order = ["pulled in", "pushed", "held", "baseline", "no baseline"]
-trend_counts = summary_df['Trend'].value_counts().reindex(trend_order, fill_value=0)
-colors = {
-    "pulled in": "#31a354",  # green
-    "pushed": "#de2d26",    # red
-    "held": "#ff7f00",      # orange
-    "baseline": "#6baed6",  # blue
-    "no baseline": "#969696" # grey
-}
+# Helper to create trend chart figure
+def create_trend_figure(trend_counts):
+    colors = {
+        "pulled in": "#31a354",  # green
+        "pushed": "#de2d26",    # red
+        "held": "#ff7f00",      # orange
+        "baseline": "#6baed6",  # blue
+        "no baseline": "#969696" # grey
+    }
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.bar(trend_counts.index, trend_counts.values, color=[colors.get(x, "#999") for x in trend_counts.index])
+    ax.set_ylabel("Count")
+    ax.set_xlabel("Trend")
+    ax.set_title("📊 Trend Breakdown")
+    ax.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    return fig
 
-fig, ax = plt.subplots(figsize=(8, 5))
-ax.bar(trend_counts.index, trend_counts.values, color=[colors.get(x, "#999") for x in trend_counts.index])
-ax.set_ylabel("Count")
-ax.set_xlabel("Trend")
-ax.set_title("📊 Trend Breakdown")
-ax.grid(axis='y', linestyle='--', alpha=0.7)
-plt.tight_layout()
-st.pyplot(fig)
-
-# Trend summary table below graph
-st.subheader("Trend Summary Table")
-st.table(trend_counts.rename_axis("Trend").reset_index().rename(columns={"index": "Trend", "Trend": "Count"}))
-
-# Detailed data table with trends
-st.subheader("Detailed Data with Trend")
-st.dataframe(df[['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes']])
-
-# Report generation helper functions
+# Convert Matplotlib figure to base64 PNG for embedding
 def fig_to_base64(fig):
     buf = BytesIO()
     fig.savefig(buf, format="png", bbox_inches='tight')
     buf.seek(0)
     return base64.b64encode(buf.read()).decode()
 
-def generate_weekly_summary(df, summary_df, fig, password):
+# Generate full HTML weekly report
+def generate_weekly_summary(df, summary_df, password):
     if password != "1234":
         return None, "❌ Incorrect password."
 
+    trend_order = ["pulled in", "pushed", "held", "baseline", "no baseline"]
+    trend_counts = summary_df['Trend'].value_counts().reindex(trend_order, fill_value=0)
+    fig = create_trend_figure(trend_counts)
     img_base64 = fig_to_base64(fig)
+
     today = datetime.date.today()
     week_number = today.isocalendar()[1]
     year = today.year
@@ -167,6 +162,11 @@ def generate_weekly_summary(df, summary_df, fig, password):
         "</style></head><body>",
         f"<h1>{year} Week: {week_number} Weekly Summary Report</h1>",
         f'<img src="data:image/png;base64,{img_base64}" style="max-width:600px; display:block; margin:auto;">',
+        "<h2>Trend Summary Table</h2>",
+        trend_counts.rename_axis("Trend").reset_index().rename(columns={"index": "Trend", "Trend": "Count"}).to_html(index=False),
+        "<h2>Detailed Data with Trend</h2>",
+        df[['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes']].to_html(index=False, escape=False),
+        "<hr>",
         "<h2>Executive Summary</h2>",
         summary_df.to_html(index=False, escape=False),
         "<hr>"
@@ -206,10 +206,10 @@ def generate_weekly_summary(df, summary_df, fig, password):
 
 
 if st.button("Generate Report"):
-    df_result, html = generate_weekly_summary(df, summary_df, fig, password)
+    df_result, html = generate_weekly_summary(df, summary_df, password)
     if html is not None:
         st.markdown("### Weekly Summary")
-        st.components.v1.html(html, height=800, scrolling=True)
+        st.components.v1.html(html, height=900, scrolling=True)
         st.download_button(
             "Download Summary as HTML",
             data=html,
