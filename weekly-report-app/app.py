@@ -46,8 +46,26 @@ if df.empty:
 df.columns = df.columns.str.strip()
 
 if "Year Week" in df.columns:
-    # Strip whitespace from values to avoid issues
-    df["Year Week"] = df["Year Week"].astype(str).str.strip()
+
+
+    
+# --- Clean & Process Data ---
+df.columns = df.columns.str.strip()  # clean column names
+
+# Convert your timestamp string to datetime object
+df["Timestamp"] = pd.to_datetime(df["Year Week"], errors='coerce')
+
+# Extract year and week number
+df["Year"] = df["Timestamp"].dt.year
+df["Week"] = df["Timestamp"].dt.isocalendar().week
+
+# Make sure 'Delta Days' is numeric
+df["Delta Days"] = pd.to_numeric(df["Delta Days"], errors="coerce").fillna(0)
+
+# Calculate Trend (sorted by Timestamp) per store
+df["Trend"] = df.sort_values("Timestamp").groupby("Store Number")["Delta Days"].diff().fillna(0)
+
+
 
     # Split with a regex that handles multiple spaces or tabs
     split_cols = df["Year Week"].str.split(r"\s+", expand=True)
