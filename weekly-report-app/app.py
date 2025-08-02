@@ -61,11 +61,15 @@ if "Year Week" in df.columns:
     df["Year"] = df["Timestamp"].dt.year
     df["Week"] = df["Timestamp"].dt.isocalendar().week
 
-    # Make sure 'Delta Days' is numeric
-    df["Delta Days"] = pd.to_numeric(df["Delta Days"], errors="coerce").fillna(0)
+# Ensure Delta Days is numeric
+df["Delta Days"] = pd.to_numeric(df["Delta Days"], errors="coerce").fillna(0)
 
-    # Calculate Trend (sorted by Timestamp) per store
-    df["Trend"] = df.sort_values("Timestamp").groupby("Store Number")["Delta Days"].diff().fillna(0)
+# Sort data first to ensure proper diff calculation
+df = df.sort_values(["Store Number", "Timestamp"])
+
+# Calculate Trend per Store Number over time
+df["Trend"] = df.groupby("Store Number")["Delta Days"].diff().fillna(0)
+
 
 else:
     st.error("'Year Week' column not found in data")
