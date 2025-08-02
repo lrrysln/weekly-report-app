@@ -23,10 +23,22 @@ client = gspread.authorize(creds)
 st.set_page_config(layout="wide", page_title="Weekly Construction Report")
 
 # --- Load Sheet ---
-SPREADSHEET_NAME = Construction Weekly Updates
-WORKSHEET_NAME = Sheet1
-sheet = client.open(Construction Weekly Updates).worksheet(Sheet1)
-data = pd.DataFrame(sheet.get_all_records())
+@st.cache_data(ttl=600)
+def load_data():
+    try:
+        sheet = client.open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET_NAME)
+        data = sheet.get_all_records()
+        df = pd.DataFrame(data)
+        return df
+    except Exception as e:
+        st.error(f"Failed to load data from Google Sheet: {e}")
+        return pd.DataFrame()
+
+df = load_data()
+
+if df.empty:
+    st.warning("⚠️ No data loaded from Google Sheet yet.")
+    st.stop()
 
 # --- Clean & Process Data ---
 data["Timestamp"] = pd.to_datetime(data["Timestamp"])
