@@ -1,112 +1,74 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
+import json
 import datetime
-import re
-import matplotlib.pyplot as plt
 import gspread
-from google.oauth2.service_account import Credentials
-import base64
-from io import BytesIO
+from oauth2client.service_account import ServiceAccountCredentials
 
-# --- Auth & Google Sheets Setup ---
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
+# ========== SETUP GOOGLE SHEETS ========== #
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+info = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+credentials = ServiceAccountCredentials.from_json_keyfile_dict(info, scope)
+client = gspread.authorize(credentials)
 
-creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
-client = gspread.authorize(creds)
+spreadsheet_url = st.secrets["SHEET_URL"]
+spreadsheet = client.open_by_url(spreadsheet_url)
+worksheet = spreadsheet.get_worksheet(0)
+data = worksheet.get_all_records()
 
-SPREADSHEET_ID = "1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w"
-WORKSHEET_NAME = "Sheet1"
-
-@st.cache_data(ttl=600)
-def load_data():
-    try:
-        sheet = client.open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET_NAME)
-        data = sheet.get_all_records()
-        df = pd.DataFrame(data)
-        return df
-    except Exception as e:
-        st.error(f"Failed to load data from Google Sheet: {e}")
-        return pd.DataFrame()
-
-df = load_data()
-
-if df.empty:
-    st.warning("⚠️ No data loaded from Google Sheet yet.")
-    st.stop()
+# ========== DATAFRAME SETUP ========== #
+df = pd.DataFrame(data)
 
 # Clean column names
-df.columns = [c.strip() for c in df.columns]
-df['Store Name'] = df['Store Name'].str.title()
+df.columns = df.columns.str.strip()
 
-# Convert and format date columns
-date_cols = [col for col in df.columns if any(k in col for k in ["⚪ Baseline", "TCO", "Walk", "Turnover", "Open to Train", "Store Opening", "Start"])]
-for col in date_cols:
-    df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%m/%d/%y')
+# ========== DATE PARSING ========== #
+df["Store Opening"] = pd.to_datetime(df["Store Opening"], errors="coerce")
+df["TCO"] = pd.to_datetime(df["TCO"], errors="coerce")
+df["Turnover"] = pd.to_datetime(df["Turnover"], errors="coerce")
+df["Baseline Parsed"] = pd.to_datetime(df["Baseline Store Opening"], errors='coerce')
 
-# Calculate deltas and flags
-try:
-    df['Store Opening Delta'] = (
-        pd.to_datetime(df['Store Opening'], errors='coerce') - pd.to_datetime(df['⚪ Baseline Store Opening'], errors='coerce')
-    ).dt.days
-    df['Flag'] = df['Store Opening Delta'].apply(lambda x: "Critical" if pd.notna(x) and x >= 5 else "")
-except:
-    df['Store Opening Delta'] = None
-    df['Flag'] = ""
+# ========== TREND LOGIC ========== #
+def detect_trend(group):
+    group = group.sort_values("Week", ascending=True)
+    trends = []
 
-# Week info
-df['Year Week'] = df['Year Week'].astype(str)
-df = df.sort_values(by=['Store Name', 'Year Week'])
+    for i in range(1, len(group)):
+        prev_date = group.iloc[i - 1]["Baseline Parsed"]
+        curr_date = group.iloc[i]["Baseline Parsed"]
 
-# Compute Trend based on Baseline comparison
-df['Store Opening Parsed'] = pd.to_datetime(df['Store Opening'], errors='coerce')
-df['Baseline Parsed'] = pd.to_datetime(df['⚪ Baseline Store Opening'], errors='coerce')
+        if pd.isnull(prev_date) or pd.isnull(curr_date):
+            trend = "↔️"
+        elif curr_date > prev_date:
+            trend = "🔺 Delayed"
+        elif curr_date < prev_date:
+            trend = "🔻 Pull Ahead"
+        else:
+            trend = "↔️ No Change"
 
-def compute_trend(row):
-    current = row['Store Opening Parsed']
-    baseline = row['Baseline Parsed']
-    if pd.isna(current):
-        return "Held"
-    if pd.isna(baseline):
-        return "No Baseline"
-    if current > baseline:
-        return "Pushed"
-    elif current < baseline:
-        return "Pulled In"
-    else:
-        return "Held"
+        trends.append(trend)
 
-df['Trend'] = df.apply(compute_trend, axis=1)
+    trends.insert(0, "–")  # First row has no prior data to compare
+    group["Trend"] = trends
+    return group
 
-# Clean Trend DataFrame
-summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes']
-summary_df = df[summary_cols].drop_duplicates(subset=['Store Name']).reset_index(drop=True)
+if "Week" in df.columns and "Baseline Parsed" in df.columns:
+    df = df.groupby("Job #").apply(detect_trend).reset_index(drop=True)
 
-# Submitted Report Overview
-st.subheader("📋 Submitted Reports Overview")
-st.markdown(f"<h4><span style='color:red;'><b>{len(summary_df)}</b></span> form responses have been submitted</h4>", unsafe_allow_html=True)
-visible_df = summary_df[['Store Number', 'Store Name', 'CPM', 'Prototype']]
-st.dataframe(visible_df)
+# ========== DISPLAY REPORT ========== #
+st.title("📊 Construction Weekly Report Summary")
+st.write(f"Last updated: {datetime.datetime.now().strftime('%B %d, %Y %I:%M %p')}")
 
-# Password section
-st.subheader("🔐 Generate Weekly Summary Report")
-password = st.text_input("Enter Password", type="password")
+if df.empty:
+    st.warning("No data found in the Google Sheet.")
+else:
+    selected_week = st.selectbox("Select Week", sorted(df["Week"].unique(), reverse=True))
+    filtered_df = df[df["Week"] == selected_week]
 
-# Trend Breakdown Chart
-st.subheader("Trend Breakdown")
-trend_counts = summary_df['Trend'].value_counts().reindex(['Pulled In', 'Pushed', 'Held', 'No Baseline'], fill_value=0)
-colors = {'Pulled In': 'green', 'Pushed': 'red', 'Held': 'yellow', 'No Baseline': 'grey'}
-fig, ax = plt.subplots()
-ax.bar(trend_counts.index, trend_counts.values, color=[colors.get(x, 'grey') for x in trend_counts.index])
-ax.set_ylabel("Count")
-ax.set_xlabel("Trend")
-plt.tight_layout()
-st.pyplot(fig)
+    st.dataframe(filtered_df[[
+        "Week", "Prototype", "Job #", "Store Name", 
+        "Baseline Store Opening", "Store Opening", "Trend", 
+        "TCO", "Turnover", "PM Notes"
+    ]].sort_values("Prototype"))
 
-# Trend Summary Table (moved here)
-st.subheader("Trend Summary Table")
-st.table(trend_counts.rename_axis("Trend").reset_index().rename(columns={"index": "Trend", "Trend": "Count"}))
-
-# Weekly Report HTML generation omitted here for brevity.
