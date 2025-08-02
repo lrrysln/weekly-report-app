@@ -44,18 +44,19 @@ if df.empty:
     st.stop()
 
 # --- Clean & Process Data ---
-df["Timestamp"] = pd.to_datetime(df["Timestamp"])
-df["Week"] = df["Timestamp"].dt.isocalendar().week
-df["Year"] = df["Timestamp"].dt.year
-
-# Fix column names if needed
+# Clean column names first
 df.columns = [col.strip() for col in df.columns]
+
+# Ensure Year and Week are numeric and valid
+df["Year"] = pd.to_numeric(df["Year"], errors='coerce').fillna(0).astype(int)
+df["Week"] = pd.to_numeric(df["Week"], errors='coerce').fillna(0).astype(int)
 
 # Ensure Delta Days is numeric
 df["Delta Days"] = pd.to_numeric(df["Delta Days"], errors="coerce").fillna(0)
 
 # Calculate Trend properly
-df["Trend"] = df.sort_values("Timestamp").groupby("Store Number")["Delta Days"].diff().fillna(0)
+df["Trend"] = df.sort_values(["Year", "Week"]).groupby("Store Number")["Delta Days"].diff().fillna(0)
+
 
 # --- Plotting ---
 def create_summary_chart(df):
