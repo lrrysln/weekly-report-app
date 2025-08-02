@@ -44,18 +44,18 @@ if df.empty:
     st.stop()
 
 # --- Clean & Process Data ---
-data["Timestamp"] = pd.to_datetime(data["Timestamp"])
-data["Week"] = data["Timestamp"].dt.isocalendar().week
-data["Year"] = data["Timestamp"].dt.year
+df["Timestamp"] = pd.to_datetime(data["Timestamp"])
+df["Week"] = data["Timestamp"].dt.isocalendar().week
+df["Year"] = data["Timestamp"].dt.year
 
 # Fix column names if needed
 data.columns = [col.strip() for col in data.columns]
 
 # Ensure Delta Days is numeric
-data["Delta Days"] = pd.to_numeric(data["Delta Days"], errors="coerce").fillna(0)
+df["Delta Days"] = pd.to_numeric(data["Delta Days"], errors="coerce").fillna(0)
 
 # Calculate Trend properly
-data["Trend"] = data.sort_values("Timestamp").groupby("Store Number")["Delta Days"].diff().fillna(0)
+df["Trend"] = data.sort_values("Timestamp").groupby("Store Number")["Delta Days"].diff().fillna(0)
 
 # --- Plotting ---
 def create_summary_chart(df):
@@ -139,7 +139,7 @@ if password:
     today = datetime.date.today()
     current_week = today.isocalendar()[1]
     current_year = today.year
-    filtered_df = data[(data["Week"] == current_week) & (data["Year"] == current_year)]
+    filtered_df = data[(df["Week"] == current_week) & (df["Year"] == current_year)]
 
     if filtered_df.empty:
         st.warning("⚠️ No data submitted yet for this week.")
