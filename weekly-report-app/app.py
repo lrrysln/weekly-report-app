@@ -10,14 +10,13 @@ from io import BytesIO
 import json
 import re
 
-# --- Google API Setup ---
+# --- Auth & Google Sheets Setup ---
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
 
-info = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
-creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
 client = gspread.authorize(creds)
 
 # --- Config ---
