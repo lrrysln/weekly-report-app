@@ -79,6 +79,7 @@ df["Trend"] = df.sort_values("Timestamp").groupby("Store Number")["Delta Days"].
         st.error("Error: 'Year Week' column values don't split properly into two parts.")
         st.stop()
 
+
 # Ensure Delta Days is numeric
 df["Delta Days"] = pd.to_numeric(df["Delta Days"], errors="coerce").fillna(0)
 
