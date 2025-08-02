@@ -157,3 +157,6 @@ if password:
 
         if html_report:
             st.markdown(html_report, unsafe_allow_html=True)
+
+st.write(df[["Store Number", "Timestamp", "Delta Days", "Trend"]].sort_values(["Store Number", "Timestamp"]).head(20))
+
