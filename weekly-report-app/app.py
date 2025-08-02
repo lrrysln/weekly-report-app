@@ -23,8 +23,8 @@ client = gspread.authorize(creds)
 st.set_page_config(layout="wide", page_title="Weekly Construction Report")
 
 # --- Load Sheet ---
-SPREADSHEET_NAME = "Construction Weekly Updates"
-WORKSHEET_NAME = "Sheet1"
+SPREADSHEET_NAME = Construction Weekly Updates
+WORKSHEET_NAME = Sheet1
 sheet = client.open(Construction Weekly Updates).worksheet(Sheet1)
 data = pd.DataFrame(sheet.get_all_records())
 
