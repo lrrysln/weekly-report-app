@@ -4,13 +4,10 @@ import numpy as np
 import json
 import datetime
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 
-# ========== SETUP GOOGLE SHEETS ========== #
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+# ========== GOOGLE SHEETS SETUP ========== #
 info = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
-credentials = ServiceAccountCredentials.from_json_keyfile_dict(info, scope)
-client = gspread.authorize(credentials)
+client = gspread.service_account_from_dict(info)
 
 spreadsheet_url = st.secrets["SHEET_URL"]
 spreadsheet = client.open_by_url(spreadsheet_url)
@@ -19,44 +16,40 @@ data = worksheet.get_all_records()
 
 # ========== DATAFRAME SETUP ========== #
 df = pd.DataFrame(data)
-
-# Clean column names
-df.columns = df.columns.str.strip()
+df.columns = df.columns.str.strip()  # Clean up whitespace
 
 # ========== DATE PARSING ========== #
-df["Store Opening"] = pd.to_datetime(df["Store Opening"], errors="coerce")
-df["TCO"] = pd.to_datetime(df["TCO"], errors="coerce")
-df["Turnover"] = pd.to_datetime(df["Turnover"], errors="coerce")
-df["Baseline Parsed"] = pd.to_datetime(df["Baseline Store Opening"], errors='coerce')
+df["Store Opening"] = pd.to_datetime(df.get("Store Opening"), errors="coerce")
+df["TCO"] = pd.to_datetime(df.get("TCO"), errors="coerce")
+df["Turnover"] = pd.to_datetime(df.get("Turnover"), errors="coerce")
+df["Baseline Parsed"] = pd.to_datetime(df.get("Baseline Store Opening"), errors="coerce")
 
-# ========== TREND LOGIC ========== #
+# ========== TREND ANALYSIS ========== #
 def detect_trend(group):
     group = group.sort_values("Week", ascending=True)
     trends = []
 
     for i in range(1, len(group)):
-        prev_date = group.iloc[i - 1]["Baseline Parsed"]
-        curr_date = group.iloc[i]["Baseline Parsed"]
+        prev = group.iloc[i - 1]["Baseline Parsed"]
+        curr = group.iloc[i]["Baseline Parsed"]
 
-        if pd.isnull(prev_date) or pd.isnull(curr_date):
-            trend = "↔️"
-        elif curr_date > prev_date:
-            trend = "🔺 Delayed"
-        elif curr_date < prev_date:
-            trend = "🔻 Pull Ahead"
+        if pd.isnull(prev) or pd.isnull(curr):
+            trends.append("↔️")
+        elif curr > prev:
+            trends.append("🔺 Delayed")
+        elif curr < prev:
+            trends.append("🔻 Pull Ahead")
         else:
-            trend = "↔️ No Change"
+            trends.append("↔️ No Change")
 
-        trends.append(trend)
-
-    trends.insert(0, "–")  # First row has no prior data to compare
+    trends.insert(0, "–")  # First row has no previous week to compare
     group["Trend"] = trends
     return group
 
 if "Week" in df.columns and "Baseline Parsed" in df.columns:
-    df = df.groupby("Job #").apply(detect_trend).reset_index(drop=True)
+    df = df.groupby("Job #", group_keys=False).apply(detect_trend)
 
-# ========== DISPLAY REPORT ========== #
+# ========== DISPLAY ========== #
 st.title("📊 Construction Weekly Report Summary")
 st.write(f"Last updated: {datetime.datetime.now().strftime('%B %d, %Y %I:%M %p')}")
 
@@ -67,8 +60,7 @@ else:
     filtered_df = df[df["Week"] == selected_week]
 
     st.dataframe(filtered_df[[
-        "Week", "Prototype", "Job #", "Store Name", 
-        "Baseline Store Opening", "Store Opening", "Trend", 
+        "Week", "Prototype", "Job #", "Store Name",
+        "Baseline Store Opening", "Store Opening", "Trend",
         "TCO", "Turnover", "PM Notes"
     ]].sort_values("Prototype"))
-
