@@ -1,26 +1,19 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import datetime
-import matplotlib.pyplot as plt
-from google.oauth2.service_account import Credentials
 import gspread
-import base64
-from io import BytesIO
-import json
-import re
+from google.oauth2.service_account import Credentials
+import matplotlib.pyplot as plt
 
 # --- Auth & Google Sheets Setup ---
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
-
 creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
 client = gspread.authorize(creds)
 
 # --- Config ---
-st.set_page_config(layout="wide", page_title="Weekly Construction Report")
+st.set_page_config(layout="wide", page_title="Store Opening Trend Tracker")
 
 # --- Load Sheet ---
 SPREADSHEET_ID = "1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w"
@@ -43,117 +36,56 @@ if df.empty:
     st.warning("⚠️ No data loaded from Google Sheet yet.")
     st.stop()
 
+# --- Clean Columns ---
 df.columns = df.columns.str.strip()
+df["Store Number"] = df["Store Number"].astype(str)
 
-if "Year Week" in df.columns:
-    # --- Clean & Process Data ---
-    # Convert your timestamp string to datetime object
-    df["Timestamp"] = pd.to_datetime(df["Year Week"], errors='coerce')
+# --- Split Baseline and Current Week ---
+baseline_df = df[df["Flag"].astype(str).str.strip() == "/True"].copy()
+current_df = df[df["Flag"].astype(str).str.strip() != "/True"].copy()
 
-    # Extract year and week number
-    df["Year"] = df["Timestamp"].dt.year
-    df["Week"] = df["Timestamp"].dt.isocalendar().week
+# Convert dates
+baseline_df["Store Opening"] = pd.to_datetime(baseline_df["Store Opening"], errors='coerce')
+current_df["Store Opening"] = pd.to_datetime(current_df["Store Opening"], errors='coerce')
 
-    # Make sure 'Delta Days' is numeric
-    df["Delta Days"] = pd.to_numeric(df["Delta Days"], errors="coerce").fillna(0)
+# Create lookup of baseline opening dates
+baseline_lookup = baseline_df.set_index("Store Number")["Store Opening"].to_dict()
 
-    # Calculate Trend (sorted by Timestamp) per store
-    df["Trend"] = df.sort_values("Timestamp").groupby("Store Number")["Delta Days"].diff().fillna(0)
-
-else:
-    st.error("'Year Week' column not found in data")
-    st.stop()
-
-# --- Plotting ---
-def create_summary_chart(df):
-    chart_data = df.groupby("Store Name")["Delta Days"].mean().sort_values()
-    fig, ax = plt.subplots(figsize=(10, 6))
-    colors = ['red' if val > 0 else 'green' for val in chart_data]
-    chart_data.plot(kind="barh", color=colors, ax=ax)
-    ax.set_title("Average Delta Days per Store")
-    ax.set_xlabel("Delta Days")
-    plt.tight_layout()
-    return fig
-
-def fig_to_base64(fig):
-    buf = BytesIO()
-    fig.savefig(buf, format="png")
-    buf.seek(0)
-    return base64.b64encode(buf.read()).decode("utf-8")
-
-# --- HTML Report ---
-def generate_weekly_summary(df, summary_df, fig, password):
-    if password != "1234":
-        return None, "❌ Incorrect password."
-
-    img_base64 = fig_to_base64(fig)
-    today = datetime.date.today()
-    week_number = today.isocalendar()[1]
-    year = today.year
-
-    html = [
-        "<html><head><style>",
-        "body{font-family:Arial;padding:20px}",
-        "h1{text-align:center}",
-        "h2{background:#cce5ff;padding:10px;border-radius:4px}",
-        "ul{margin:0 0 20px;padding-left:20px}",
-        "b.header{font-size:1.4em; display:block; margin-top:20px; margin-bottom:8px;}",
-        "</style></head><body>",
-        f"<h1>{year} Week: {week_number} Weekly Summary Report</h1>",
-        f'<img src="data:image/png;base64,{img_base64}" style="max-width:600px; display:block; margin:auto;">',
-        "<h2>Executive Summary</h2>",
-        summary_df.to_html(index=False, escape=False),
-        "<hr><h2>Site Notes</h2>"
-    ]
-
-    group_col = "Subject" if "Subject" in df.columns else "Store Name"
-    for group_name, group_df in df.groupby(group_col):
-        html.append(f"<h2>{group_name}</h2>")
-        for _, row in group_df.iterrows():
-            # First line: Bold, larger font, not a bullet
-            store_info = f"{row.get('Store Number', '')} - {row.get('Store Name', '')}, {row.get('Prototype', '')} ({row.get('CPM', '')})"
-            html.append(f"<b class='header'>{store_info}</b>")
-
-            # Remaining bullets
-            bullet_fields = ["Start", "TCO", "Turnover", "Notes"]
-            bullets = []
-            for field in bullet_fields:
-                val = row.get(field, "")
-                if pd.notna(val) and str(val).strip():
-                    if field == "Notes":
-                        # Split multiple lines into bullets
-                        note_lines = re.split(r"\n|\r", str(val))
-                        for line in note_lines:
-                            line = line.strip("•-–● ").strip()
-                            if line:
-                                bullets.append(f"<li>{line}</li>")
-                    else:
-                        bullets.append(f"<li>{field}: {val}</li>")
-
-            if bullets:
-                html.append("<ul>")
-                html.extend(bullets)
-                html.append("</ul>")
-
-    html.append("</body></html>")
-    return df, "".join(html)
-
-# --- Streamlit UI ---
-st.title("📋 Weekly Construction Summary Generator")
-password = st.text_input("Enter admin password to generate report", type="password")
-
-if password:
-    today = datetime.date.today()
-    current_week = today.isocalendar()[1]
-    current_year = today.year
-    filtered_df = df[(df["Week"] == current_week) & (df["Year"] == current_year)]
-
-    if filtered_df.empty:
-        st.warning("⚠️ No data submitted yet for this week.")
+# --- Compare Dates and Assign Trend ---
+def get_trend(store_num, current_open_date):
+    baseline_date = baseline_lookup.get(store_num)
+    if baseline_date is None or pd.isna(current_open_date):
+        return "⚫ No Baseline"
+    if current_open_date > baseline_date:
+        return "🔴 Pushed"
+    elif current_open_date < baseline_date:
+        return "🟢 Pulled In"
     else:
-        summary_df = filtered_df[["Store Name", "Store Number", "Prototype", "CPM", "Delta Days", "Trend"]].drop_duplicates()
-        fig = create_summary_chart(filtered_df)
-        df_out, html_report = generate_weekly_summary(filtered_df, summary_df, fig, password)
+        return "🟡 Held"
 
-        if html_report:
-            st.markdown(html_report, unsafe_allow_html=True)
+current_df["Trend"] = current_df.apply(
+    lambda row: get_trend(row["Store Number"], row["Store Opening"]), axis=1
+)
+
+# Add Baseline trend rows too
+baseline_df["Trend"] = "🟤 Baseline"
+
+# Combine all for output
+final_df = pd.concat([baseline_df, current_df], ignore_index=True)
+
+# --- Display Table ---
+st.subheader("📋 Store Opening Trend Table")
+st.dataframe(final_df[[
+    "Store Name", "Store Number", "Prototype", "CPM", "Trend", "Store Opening", "Notes"
+]])
+
+# --- Chart: Trend Counts ---
+st.subheader("📊 Store Opening Trend Summary")
+trend_counts = final_df["Trend"].value_counts()
+
+fig, ax = plt.subplots()
+trend_counts.plot(kind='bar', color=["#DA3E52", "#3CBA54", "#F4C300", "#A9A9A9", "#8E8E8E"], ax=ax)
+ax.set_title("Store Opening Trend Count")
+ax.set_xlabel("Trend")
+ax.set_ylabel("Number of Stores")
+st.pyplot(fig)
