@@ -1,54 +1,159 @@
+import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+import numpy as np
+import datetime
+import matplotlib.pyplot as plt
+from google.oauth2.service_account import Credentials
+import gspread
+import base64
+from io import BytesIO
+import json
+import re
 
-# Copy the original dataframe
-test_df = df.copy()
+# --- Auth & Google Sheets Setup ---
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
 
-# Create fake data for testing
-fake_data = pd.DataFrame([
-    {
-        "Timestamp": datetime.now() - timedelta(weeks=2),
-        "Store Number": "1234",
-        "Store Name": "Mock Store A",
-        "Prototype": "Prototype A",
-        "CPM": "PM1",
-        "Baseline": datetime(2025, 8, 1),
-        "Store Opening": datetime(2025, 8, 5),
-        "Notes": "Initial week"
-    },
-    {
-        "Timestamp": datetime.now() - timedelta(weeks=1),
-        "Store Number": "1234",
-        "Store Name": "Mock Store A",
-        "Prototype": "Prototype A",
-        "CPM": "PM1",
-        "Baseline": datetime(2025, 8, 1),
-        "Store Opening": datetime(2025, 8, 7),
-        "Notes": "Second week"
-    },
-    {
-        "Timestamp": datetime.now(),
-        "Store Number": "5678",
-        "Store Name": "Mock Store B",
-        "Prototype": "Prototype B",
-        "CPM": "PM2",
-        "Baseline": datetime(2025, 8, 1),
-        "Store Opening": datetime(2025, 8, 10),
-        "Notes": "Only one entry"
-    },
-])
+creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
+client = gspread.authorize(creds)
 
-# Concatenate with your actual data
-test_df = pd.concat([test_df, fake_data], ignore_index=True)
+# --- Config ---
+st.set_page_config(layout="wide", page_title="Weekly Construction Report")
 
-# Ensure datetime types
-test_df["Baseline"] = pd.to_datetime(test_df["Baseline"], errors="coerce")
-test_df["Store Opening"] = pd.to_datetime(test_df["Store Opening"], errors="coerce")
-test_df["Timestamp"] = pd.to_datetime(test_df["Timestamp"], errors="coerce")
+# --- Load Sheet ---
+SPREADSHEET_ID = "1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w"
+WORKSHEET_NAME = "Sheet1"
 
-# Recalculate Delta and Trend
-test_df["Delta Days"] = (test_df["Store Opening"] - test_df["Baseline"]).dt.days
-test_df["Trend"] = test_df.sort_values("Timestamp").groupby("Store Number")["Delta Days"].diff().fillna(0)
+@st.cache_data(ttl=600)
+def load_data():
+    try:
+        sheet = client.open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET_NAME)
+        data = sheet.get_all_records()
+        df = pd.DataFrame(data)
+        return df
+    except Exception as e:
+        st.error(f"Failed to load data from Google Sheet: {e}")
+        return pd.DataFrame()
 
-# Preview
-st.dataframe(test_df[["Timestamp", "Store Number", "Store Name", "Delta Days", "Trend", "Notes"]])
+df = load_data()
+
+if df.empty:
+    st.warning("⚠️ No data loaded from Google Sheet yet.")
+    st.stop()
+
+df.columns = df.columns.str.strip()
+
+if "Year Week" in df.columns:
+    # --- Clean & Process Data ---
+    # Convert your timestamp string to datetime object
+    df["Timestamp"] = pd.to_datetime(df["Year Week"], errors='coerce')
+
+    # Extract year and week number
+    df["Year"] = df["Timestamp"].dt.year
+    df["Week"] = df["Timestamp"].dt.isocalendar().week
+
+    # Make sure 'Delta Days' is numeric
+    df["Delta Days"] = pd.to_numeric(df["Delta Days"], errors="coerce").fillna(0)
+
+    # Calculate Trend (sorted by Timestamp) per store
+    df["Trend"] = df.sort_values("Timestamp").groupby("Store Number")["Delta Days"].diff().fillna(0)
+
+else:
+    st.error("'Year Week' column not found in data")
+    st.stop()
+
+# --- Plotting ---
+def create_summary_chart(df):
+    chart_data = df.groupby("Store Name")["Delta Days"].mean().sort_values()
+    fig, ax = plt.subplots(figsize=(10, 6))
+    colors = ['red' if val > 0 else 'green' for val in chart_data]
+    chart_data.plot(kind="barh", color=colors, ax=ax)
+    ax.set_title("Average Delta Days per Store")
+    ax.set_xlabel("Delta Days")
+    plt.tight_layout()
+    return fig
+
+def fig_to_base64(fig):
+    buf = BytesIO()
+    fig.savefig(buf, format="png")
+    buf.seek(0)
+    return base64.b64encode(buf.read()).decode("utf-8")
+
+# --- HTML Report ---
+def generate_weekly_summary(df, summary_df, fig, password):
+    if password != "1234":
+        return None, "❌ Incorrect password."
+
+    img_base64 = fig_to_base64(fig)
+    today = datetime.date.today()
+    week_number = today.isocalendar()[1]
+    year = today.year
+
+    html = [
+        "<html><head><style>",
+        "body{font-family:Arial;padding:20px}",
+        "h1{text-align:center}",
+        "h2{background:#cce5ff;padding:10px;border-radius:4px}",
+        "ul{margin:0 0 20px;padding-left:20px}",
+        "b.header{font-size:1.4em; display:block; margin-top:20px; margin-bottom:8px;}",
+        "</style></head><body>",
+        f"<h1>{year} Week: {week_number} Weekly Summary Report</h1>",
+        f'<img src="data:image/png;base64,{img_base64}" style="max-width:600px; display:block; margin:auto;">',
+        "<h2>Executive Summary</h2>",
+        summary_df.to_html(index=False, escape=False),
+        "<hr><h2>Site Notes</h2>"
+    ]
+
+    group_col = "Subject" if "Subject" in df.columns else "Store Name"
+    for group_name, group_df in df.groupby(group_col):
+        html.append(f"<h2>{group_name}</h2>")
+        for _, row in group_df.iterrows():
+            # First line: Bold, larger font, not a bullet
+            store_info = f"{row.get('Store Number', '')} - {row.get('Store Name', '')}, {row.get('Prototype', '')} ({row.get('CPM', '')})"
+            html.append(f"<b class='header'>{store_info}</b>")
+
+            # Remaining bullets
+            bullet_fields = ["Start", "TCO", "Turnover", "Notes"]
+            bullets = []
+            for field in bullet_fields:
+                val = row.get(field, "")
+                if pd.notna(val) and str(val).strip():
+                    if field == "Notes":
+                        # Split multiple lines into bullets
+                        note_lines = re.split(r"\n|\r", str(val))
+                        for line in note_lines:
+                            line = line.strip("•-–● ").strip()
+                            if line:
+                                bullets.append(f"<li>{line}</li>")
+                    else:
+                        bullets.append(f"<li>{field}: {val}</li>")
+
+            if bullets:
+                html.append("<ul>")
+                html.extend(bullets)
+                html.append("</ul>")
+
+    html.append("</body></html>")
+    return df, "".join(html)
+
+# --- Streamlit UI ---
+st.title("📋 Weekly Construction Summary Generator")
+password = st.text_input("Enter admin password to generate report", type="password")
+
+if password:
+    today = datetime.date.today()
+    current_week = today.isocalendar()[1]
+    current_year = today.year
+    filtered_df = df[(df["Week"] == current_week) & (df["Year"] == current_year)]
+
+    if filtered_df.empty:
+        st.warning("⚠️ No data submitted yet for this week.")
+    else:
+        summary_df = filtered_df[["Store Name", "Store Number", "Prototype", "CPM", "Delta Days", "Trend"]].drop_duplicates()
+        fig = create_summary_chart(filtered_df)
+        df_out, html_report = generate_weekly_summary(filtered_df, summary_df, fig, password)
+
+        if html_report:
+            st.markdown(html_report, unsafe_allow_html=True)
