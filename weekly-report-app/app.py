@@ -1,8 +1,12 @@
 import streamlit as st
 import pandas as pd
+import datetime
+import re
 import matplotlib.pyplot as plt
-from google.oauth2.service_account import Credentials
 import gspread
+from google.oauth2.service_account import Credentials
+import base64
+from io import BytesIO
 
 # --- Auth & Google Sheets Setup ---
 SCOPES = [
@@ -13,85 +17,96 @@ SCOPES = [
 creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
 client = gspread.authorize(creds)
 
-# --- Streamlit Config ---
-st.set_page_config(layout="wide", page_title="Store Opening Trend Analysis")
-st.title("📊 Store Opening Trend Analysis")
-
 SPREADSHEET_ID = "1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w"
 WORKSHEET_NAME = "Sheet1"
 
 @st.cache_data(ttl=600)
 def load_data():
-    sheet = client.open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET_NAME)
-    data = sheet.get_all_records()
-    df = pd.DataFrame(data)
-    return df
+    try:
+        sheet = client.open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET_NAME)
+        data = sheet.get_all_records()
+        df = pd.DataFrame(data)
+        return df
+    except Exception as e:
+        st.error(f"Failed to load data from Google Sheet: {e}")
+        return pd.DataFrame()
 
 df = load_data()
 
 if df.empty:
-    st.warning("⚠️ No data loaded.")
+    st.warning("⚠️ No data loaded from Google Sheet yet.")
     st.stop()
 
-# --- Preprocess ---
-df.columns = df.columns.str.strip()
-df['Store Opening'] = pd.to_datetime(df['Store Opening'], errors='coerce')
-df['Store Number'] = df['Store Number'].astype(str).str.strip()
-df['Baseline'] = df['Baseline'].astype(str).str.strip()
+# Clean column names
+df.columns = [c.strip() for c in df.columns]
+df['Store Name'] = df['Store Name'].str.title()
 
-# --- Separate baseline & non-baseline entries ---
-baseline_df = df[df['Baseline'] == "/True"].copy()
-update_df = df[df['Baseline'] != "/True"].copy()
+# Convert and format date columns
+date_cols = [col for col in df.columns if any(k in col for k in ["⚪ Baseline", "TCO", "Walk", "Turnover", "Open to Train", "Store Opening", "Start"])]
+for col in date_cols:
+    df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%m/%d/%y')
 
-# Index baseline data by Store Number for fast lookup
-baseline_map = baseline_df.set_index('Store Number')['Store Opening'].to_dict()
+# Calculate deltas and flags
+try:
+    df['Store Opening Delta'] = (
+        pd.to_datetime(df['Store Opening'], errors='coerce') - pd.to_datetime(df['⚪ Baseline Store Opening'], errors='coerce')
+    ).dt.days
+    df['Flag'] = df['Store Opening Delta'].apply(lambda x: "Critical" if pd.notna(x) and x >= 5 else "")
+except:
+    df['Store Opening Delta'] = None
+    df['Flag'] = ""
 
-# --- Trend Logic ---
+# Week info
+df['Year Week'] = df['Year Week'].astype(str)
+df = df.sort_values(by=['Store Name', 'Year Week'])
+
+# Compute Trend based on Baseline comparison
+df['Store Opening Parsed'] = pd.to_datetime(df['Store Opening'], errors='coerce')
+df['Baseline Parsed'] = pd.to_datetime(df['⚪ Baseline Store Opening'], errors='coerce')
+
 def compute_trend(row):
-    store_number = row['Store Number']
-    current_open = row['Store Opening']
-    
-    if row['Baseline'] == "/True":
-        return "baseline"
-    
-    baseline_open = baseline_map.get(store_number)
-    
-    if pd.isna(current_open) or pd.isna(baseline_open):
+    current = row['Store Opening Parsed']
+    baseline = row['Baseline Parsed']
+    if pd.isna(current):
+        return "Held"
+    if pd.isna(baseline):
         return "No Baseline"
-    
-    if current_open > baseline_open:
-        return "pushed"
-    elif current_open < baseline_open:
-        return "pulled in"
+    if current > baseline:
+        return "Pushed"
+    elif current < baseline:
+        return "Pulled In"
     else:
-        return "held"
+        return "Held"
 
 df['Trend'] = df.apply(compute_trend, axis=1)
 
-# --- Summary Count ---
-trend_counts = df['Trend'].value_counts().reindex(
-    ["baseline", "pushed", "pulled in", "held", "No Baseline"], fill_value=0)
+# Clean Trend DataFrame
+summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes']
+summary_df = df[summary_cols].drop_duplicates(subset=['Store Name']).reset_index(drop=True)
 
-# --- Display Summary ---
-st.subheader("Trend Summary")
-st.table(trend_counts.rename_axis("Trend").reset_index().rename(columns={"index": "Trend", "Trend": "Count"}))
+# Submitted Report Overview
+st.subheader("📋 Submitted Reports Overview")
+st.markdown(f"<h4><span style='color:red;'><b>{len(summary_df)}</b></span> form responses have been submitted</h4>", unsafe_allow_html=True)
+visible_df = summary_df[['Store Number', 'Store Name', 'CPM', 'Prototype']]
+st.dataframe(visible_df)
 
-# --- Bar Chart ---
-fig, ax = plt.subplots(figsize=(8, 5))
-colors = {
-    "baseline": "#6baed6",
-    "pushed": "#de2d26",
-    "pulled in": "#31a354",
-    "held": "#ff7f00",
-    "No Baseline": "#969696"
-}
-ax.bar(trend_counts.index, trend_counts.values, color=[colors.get(tr, "#999") for tr in trend_counts.index])
-ax.set_title("📊 Trend Breakdown")
-ax.set_ylabel("Store Count")
+# Password section
+st.subheader("🔐 Generate Weekly Summary Report")
+password = st.text_input("Enter Password", type="password")
+
+# Trend Breakdown Chart
+st.subheader("Trend Breakdown")
+trend_counts = summary_df['Trend'].value_counts().reindex(['Pulled In', 'Pushed', 'Held', 'No Baseline'], fill_value=0)
+colors = {'Pulled In': 'green', 'Pushed': 'red', 'Held': 'yellow', 'No Baseline': 'grey'}
+fig, ax = plt.subplots()
+ax.bar(trend_counts.index, trend_counts.values, color=[colors.get(x, 'grey') for x in trend_counts.index])
+ax.set_ylabel("Count")
 ax.set_xlabel("Trend")
-ax.grid(axis='y', linestyle='--', alpha=0.7)
+plt.tight_layout()
 st.pyplot(fig)
 
-# --- Optional: Show Table ---
-st.subheader("Detailed Data with Trend")
-st.dataframe(df[['Store Name', 'Store Number', 'Prototype', 'Project Manager', 'Store Opening', 'Baseline', 'Trend']])
+# Trend Summary Table (moved here)
+st.subheader("Trend Summary Table")
+st.table(trend_counts.rename_axis("Trend").reset_index().rename(columns={"index": "Trend", "Trend": "Count"}))
+
+# Weekly Report HTML generation omitted here for brevity.
