@@ -45,6 +45,13 @@ if df.empty:
 
 df.columns = df.columns.str.strip()
 
+# --- Parse 'Baseline' column if it exists ---
+if "Baseline" in df.columns:
+    # Split Baseline into 'Baseline Date' and 'Is Baseline' using the slash as delimiter
+    split_baseline = df["Baseline"].astype(str).str.split("/", expand=True)
+    df["Baseline Date"] = pd.to_datetime(split_baseline[0], errors="coerce")
+    df["Is Baseline"] = split_baseline[1].fillna("").str.strip().str.lower() == "true"
+
 if "Year Week" in df.columns:
     # --- Clean & Process Data ---
     # Convert your timestamp string to datetime object
