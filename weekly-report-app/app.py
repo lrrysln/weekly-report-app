@@ -46,46 +46,23 @@ if df.empty:
 df.columns = df.columns.str.strip()
 
 if "Year Week" in df.columns:
+    # --- Clean & Process Data ---
+    # Convert your timestamp string to datetime object
+    df["Timestamp"] = pd.to_datetime(df["Year Week"], errors='coerce')
 
+    # Extract year and week number
+    df["Year"] = df["Timestamp"].dt.year
+    df["Week"] = df["Timestamp"].dt.isocalendar().week
 
-    
-# --- Clean & Process Data ---
-df.columns = df.columns.str.strip()  # clean column names
+    # Make sure 'Delta Days' is numeric
+    df["Delta Days"] = pd.to_numeric(df["Delta Days"], errors="coerce").fillna(0)
 
-# Convert your timestamp string to datetime object
-df["Timestamp"] = pd.to_datetime(df["Year Week"], errors='coerce')
+    # Calculate Trend (sorted by Timestamp) per store
+    df["Trend"] = df.sort_values("Timestamp").groupby("Store Number")["Delta Days"].diff().fillna(0)
 
-# Extract year and week number
-df["Year"] = df["Timestamp"].dt.year
-df["Week"] = df["Timestamp"].dt.isocalendar().week
-
-# Make sure 'Delta Days' is numeric
-df["Delta Days"] = pd.to_numeric(df["Delta Days"], errors="coerce").fillna(0)
-
-# Calculate Trend (sorted by Timestamp) per store
-df["Trend"] = df.sort_values("Timestamp").groupby("Store Number")["Delta Days"].diff().fillna(0)
-
-
-
-    # Split with a regex that handles multiple spaces or tabs
-    split_cols = df["Year Week"].str.split(r"\s+", expand=True)
-
-    # Check if split_cols has exactly two columns
-    if split_cols.shape[1] == 2:
-        df["Year"] = pd.to_numeric(split_cols[0], errors='coerce').fillna(0).astype(int)
-        df["Week"] = pd.to_numeric(split_cols[1], errors='coerce').fillna(0).astype(int)
-        df.drop(columns=["Year Week"], inplace=True)
-    else:
-        st.error("Error: 'Year Week' column values don't split properly into two parts.")
-        st.stop()
-
-
-# Ensure Delta Days is numeric
-df["Delta Days"] = pd.to_numeric(df["Delta Days"], errors="coerce").fillna(0)
-
-# Calculate Trend properly
-df["Trend"] = df.sort_values(["Year", "Week"]).groupby("Store Number")["Delta Days"].diff().fillna(0)
-
+else:
+    st.error("'Year Week' column not found in data")
+    st.stop()
 
 # --- Plotting ---
 def create_summary_chart(df):
