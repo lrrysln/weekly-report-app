@@ -43,6 +43,14 @@ if df.empty:
     st.warning("⚠️ No data loaded from Google Sheet yet.")
     st.stop()
 
+df.columns = df.columns.str.strip()
+
+if "Year Week" in df.columns:
+    df[["Year", "Week"]] = df["Year Week"].str.split(expand=True)
+    df["Year"] = pd.to_numeric(df["Year"], errors='coerce').fillna(0).astype(int)
+    df["Week"] = pd.to_numeric(df["Week"], errors='coerce').fillna(0).astype(int)
+    df.drop(columns=["Year Week"], inplace=True)
+
 # --- Clean & Process Data ---
 # Clean column names first
 df.columns = [col.strip() for col in df.columns]
