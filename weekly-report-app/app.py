@@ -46,18 +46,20 @@ if df.empty:
 df.columns = df.columns.str.strip()
 
 if "Year Week" in df.columns:
-    df[["Year", "Week"]] = df["Year Week"].str.split(expand=True)
-    df["Year"] = pd.to_numeric(df["Year"], errors='coerce').fillna(0).astype(int)
-    df["Week"] = pd.to_numeric(df["Week"], errors='coerce').fillna(0).astype(int)
-    df.drop(columns=["Year Week"], inplace=True)
+    # Strip whitespace from values to avoid issues
+    df["Year Week"] = df["Year Week"].astype(str).str.strip()
 
-# --- Clean & Process Data ---
-# Clean column names first
-df.columns = [col.strip() for col in df.columns]
+    # Split with a regex that handles multiple spaces or tabs
+    split_cols = df["Year Week"].str.split(r"\s+", expand=True)
 
-# Ensure Year and Week are numeric and valid
-df["Year"] = pd.to_numeric(df["Year"], errors='coerce').fillna(0).astype(int)
-df["Week"] = pd.to_numeric(df["Week"], errors='coerce').fillna(0).astype(int)
+    # Check if split_cols has exactly two columns
+    if split_cols.shape[1] == 2:
+        df["Year"] = pd.to_numeric(split_cols[0], errors='coerce').fillna(0).astype(int)
+        df["Week"] = pd.to_numeric(split_cols[1], errors='coerce').fillna(0).astype(int)
+        df.drop(columns=["Year Week"], inplace=True)
+    else:
+        st.error("Error: 'Year Week' column values don't split properly into two parts.")
+        st.stop()
 
 # Ensure Delta Days is numeric
 df["Delta Days"] = pd.to_numeric(df["Delta Days"], errors="coerce").fillna(0)
