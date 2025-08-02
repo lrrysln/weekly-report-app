@@ -7,10 +7,16 @@ from google.oauth2.service_account import Credentials
 import gspread
 import base64
 from io import BytesIO
+import json
+from streamlit.runtime.secrets import secrets
+
+
+
 
 # --- Google Sheets Auth ---
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
+info = json.loads(secrets["GOOGLE_CREDENTIALS"])
+creds = Credentials.from_service_account_info(info, scopes=SCOPES)
 client = gspread.authorize(creds)
 
 # --- Config ---
