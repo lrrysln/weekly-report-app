@@ -9,11 +9,16 @@ import base64
 from io import BytesIO
 import json
 
-# --- Google Sheets Auth ---
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-info = json.loads(secrets["GOOGLE_CREDENTIALS"])
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
+
+# Proper way to use Streamlit secrets
+info = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
 creds = Credentials.from_service_account_info(info, scopes=SCOPES)
 client = gspread.authorize(creds)
+
 
 # --- Config ---
 st.set_page_config(layout="wide", page_title="Weekly Construction Report")
