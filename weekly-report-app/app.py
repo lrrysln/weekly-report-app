@@ -5,15 +5,15 @@ from google.oauth2.service_account import Credentials
 import plotly.express as px
 from datetime import datetime
 
+st.set_page_config(page_title="Weekly Construction Trend Report", layout="wide")
+
 # --- Auth & Google Sheets Setup ---
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
-creds = Credentials.from_service_account_info(
-    st.secrets["gcp_service_account"],
-    scopes=SCOPES
-)
+
+creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
 client = gspread.authorize(creds)
 
 SPREADSHEET_ID = "1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w"
@@ -37,69 +37,67 @@ if df.empty:
     st.stop()
 
 # --- Password Protection ---
-PASSWORD = "weeklyupdate"
-entered_pw = st.text_input("🔒 Enter password to view report:", type="password")
-if entered_pw != PASSWORD:
+PASSWORD = st.secrets.get("password", "admin123")
+entered_password = st.text_input("Enter password to view the report", type="password")
+
+if entered_password != PASSWORD:
     st.stop()
 
-# --- Data Cleaning ---
-df['Store Opening'] = pd.to_datetime(df['Store Opening'], errors='coerce')
-df['⚪ Baseline Store Opening'] = pd.to_datetime(df['⚪ Baseline Store Opening'], errors='coerce')
+# --- Date Parsing ---
+df['Store Opening Parsed'] = pd.to_datetime(df['Store Opening'], errors='coerce')
+df['Baseline Parsed'] = pd.to_datetime(df['⚪ Baseline Store Opening'], errors='coerce')
 
-# --- Delta & Flag Calculation ---
-def calculate_delta(row):
-    if pd.isna(row['⚪ Baseline Store Opening']):
-        return "no baseline dates"
+# --- Delta and Trend Categorization ---
+def get_trend(row):
+    if pd.isnull(row['Baseline Parsed']):
+        return "no baseline dates", "", ""
+    delta = (row['Store Opening Parsed'] - row['Baseline Parsed']).days
+    if delta > 0:
+        trend = "Pushed"
+    elif delta < 0:
+        trend = "Pulled In"
     else:
-        return (row['Store Opening'] - row['⚪ Baseline Store Opening']).days
+        trend = "Held"
+    flag = f"<span style='color:red'>*</span>" if abs(delta) > 5 else ""
+    return trend, delta, flag
 
-df['Store Opening Delta'] = df.apply(calculate_delta, axis=1)
-
-def flag(row):
-    if isinstance(row['Store Opening Delta'], int) and row['Store Opening Delta'] > 5:
-        return "<span style='color:red'>*</span>"
-    else:
-        return ""
-
-df['Flag'] = df.apply(flag, axis=1)
-
-# --- Trend Categorization ---
-def categorize_trend(row):
-    if isinstance(row['Store Opening Delta'], str):
-        return row['Store Opening Delta']
-    elif row['Store Opening Delta'] > 0:
-        return "Pushed"
-    elif row['Store Opening Delta'] < 0:
-        return "Pulled In"
-    else:
-        return "Held"
-
-df['Trend'] = df.apply(categorize_trend, axis=1)
+df[['Trend Type', 'Store Opening Delta', 'Flag']] = df.apply(
+    lambda row: pd.Series(get_trend(row)), axis=1
+)
 
 # --- Trend Summary Table ---
-summary_df = df['Trend'].value_counts().reset_index()
-summary_df.columns = ['Trend', 'Count']
+trend_summary = df['Trend Type'].value_counts().reset_index()
+trend_summary.columns = ['Trend', 'Count']
 
 # --- Trend Breakdown Chart ---
-fig = px.pie(summary_df, values='Count', names='Trend', title="Store Opening Trends Breakdown")
+fig = px.pie(trend_summary, names='Trend', values='Count', title="📊 Trend Breakdown")
 
-# --- HTML Report Generation ---
-def generate_html_report(df, summary_df, fig_html):
-    summary_html = summary_df.to_html(index=False)
-    trend_table_html = df[['Store', 'Prototype', 'Store Opening', '⚪ Baseline Store Opening', 'Store Opening Delta', 'Trend', 'Flag']].to_html(index=False, escape=False)
+# --- Final HTML Report ---
+def generate_report(df, fig, trend_summary):
+    st.markdown("### 📋 Executive Summary")
 
-    html_report = f"""
-    <h2>📊 Store Opening Weekly Report</h2>
-    <h3>Trend Summary</h3>
-    {summary_html}
-    <h3>Trend Breakdown Chart</h3>
-    {fig_html}
-    """
-    return html_report
+    # Pie chart
+    st.plotly_chart(fig, use_container_width=True)
 
-# Convert Plotly chart to HTML string
-fig_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
+    # Summary table
+    st.markdown("#### 🧮 Trend Summary Table")
+    st.dataframe(trend_summary)
 
-# --- Display Report ---
-st.markdown("## 🧾 Executive Summary")
-st.components.v1.html(generate_html_report(df, summary_df, fig_html), height=800, scrolling=True)
+    # Simplified detailed view
+    st.markdown("#### 🏗️ Store-Level Weekly Trend")
+    styled_df = df[['Store #', 'Store Name', '⚪ Baseline Store Opening', 'Store Opening', 'Trend Type', 'Store Opening Delta', 'Flag']].copy()
+    styled_df['Flag'] = styled_df['Flag'].astype(str)
+    styled_df['Flag'] = styled_df['Flag'].apply(lambda x: x if x else "")
+    
+    def highlight_flag(val):
+        return "color: red;" if "*" in val else ""
+
+    st.dataframe(
+        styled_df.style.set_properties(**{
+            'Flag': 'text-align: center;'
+        }).applymap(highlight_flag, subset=['Flag']),
+        use_container_width=True
+    )
+
+# --- Generate Report ---
+generate_report(df, fig, trend_summary)
