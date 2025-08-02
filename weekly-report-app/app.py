@@ -23,6 +23,9 @@ client = gspread.authorize(creds)
 st.set_page_config(layout="wide", page_title="Weekly Construction Report")
 
 # --- Load Sheet ---
+SPREADSHEET_ID = "1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w"
+WORKSHEET_NAME = "Sheet1"
+
 @st.cache_data(ttl=600)
 def load_data():
     try:
