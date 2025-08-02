@@ -49,13 +49,13 @@ df["Week"] = df["Timestamp"].dt.isocalendar().week
 df["Year"] = df["Timestamp"].dt.year
 
 # Fix column names if needed
-data.columns = [col.strip() for col in data.columns]
+df.columns = [col.strip() for col in df.columns]
 
 # Ensure Delta Days is numeric
-df["Delta Days"] = pd.to_numeric(data["Delta Days"], errors="coerce").fillna(0)
+df["Delta Days"] = pd.to_numeric(df["Delta Days"], errors="coerce").fillna(0)
 
 # Calculate Trend properly
-df["Trend"] = data.sort_values("Timestamp").groupby("Store Number")["Delta Days"].diff().fillna(0)
+df["Trend"] = df.sort_values("Timestamp").groupby("Store Number")["Delta Days"].diff().fillna(0)
 
 # --- Plotting ---
 def create_summary_chart(df):
