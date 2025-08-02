@@ -1,24 +1,25 @@
 import streamlit as st
 import pandas as pd
 import datetime
-import json
 import gspread
 from google.oauth2.service_account import Credentials
 
-# --- Setup Page ---
-st.set_page_config(page_title="Weekly Construction Report", layout="wide")
-st.title("📋 Weekly Construction Report")
+# --- Auth & Google Sheets Setup ---
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
 
-# --- Load Google Credentials ---
-info = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
-
-scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-creds = Credentials.from_service_account_info(info, scopes=scope)
+# Use the secret key "gcp_service_account" (dict format) to load credentials
+creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
 client = gspread.authorize(creds)
 
 # --- Config ---
-SPREADSHEET_ID = "your_google_sheet_id_here"   # Replace with actual Sheet ID
-SHEET_NAME = "Sheet1"  # Replace with your actual sheet name
+st.set_page_config(page_title="Weekly Construction Report", layout="wide")
+st.title("📋 Weekly Construction Report")
+
+SPREADSHEET_ID = "1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w"
+SHEET_NAME = "Sheet1"
 
 # --- Load Sheet ---
 sheet = client.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
