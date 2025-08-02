@@ -1,20 +1,19 @@
 import streamlit as st
 import pandas as pd
-import datetime
-import re
-import matplotlib.pyplot as plt
 import gspread
 from google.oauth2.service_account import Credentials
-import base64
-from io import BytesIO
+import plotly.express as px
+from datetime import datetime
 
 # --- Auth & Google Sheets Setup ---
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
-
-creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
+creds = Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"],
+    scopes=SCOPES
+)
 client = gspread.authorize(creds)
 
 SPREADSHEET_ID = "1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w"
@@ -37,183 +36,70 @@ if df.empty:
     st.warning("⚠️ No data loaded from Google Sheet yet.")
     st.stop()
 
-# Clean column names
-df.columns = df.columns.str.strip()
+# --- Password Protection ---
+PASSWORD = "weeklyupdate"
+entered_pw = st.text_input("🔒 Enter password to view report:", type="password")
+if entered_pw != PASSWORD:
+    st.stop()
 
-# Format store names
-df['Store Name'] = df['Store Name'].str.title()
-
-# Convert date columns to datetime for trend calculation (don't format to string here)
+# --- Data Cleaning ---
 df['Store Opening'] = pd.to_datetime(df['Store Opening'], errors='coerce')
-df['Baseline'] = df['Baseline'].astype(str).str.strip()
-df['Store Number'] = df['Store Number'].astype(str).str.strip()
+df['⚪ Baseline Store Opening'] = pd.to_datetime(df['⚪ Baseline Store Opening'], errors='coerce')
 
-# Separate baseline & non-baseline entries
-baseline_df = df[df['Baseline'] == "/True"].copy()
-baseline_map = baseline_df.set_index('Store Number')['Store Opening'].to_dict()
-
-# Trend calculation
-def compute_trend(row):
-    store_number = row['Store Number']
-    current_open = row['Store Opening']
-
-    if row['Baseline'] == "/True":
-        return "baseline"
-
-    baseline_open = baseline_map.get(store_number)
-    # Treat missing baseline as held (no "no baseline" category)
-    if pd.isna(current_open) or pd.isna(baseline_open):
-        return "held"
-    if current_open > baseline_open:
-        return "pushed"
-    elif current_open < baseline_open:
-        return "pulled in"
+# --- Delta & Flag Calculation ---
+def calculate_delta(row):
+    if pd.isna(row['⚪ Baseline Store Opening']):
+        return "no baseline dates"
     else:
-        return "held"
+        return (row['Store Opening'] - row['⚪ Baseline Store Opening']).days
 
-df['Trend'] = df.apply(compute_trend, axis=1)
+df['Store Opening Delta'] = df.apply(calculate_delta, axis=1)
 
-# Calculate deltas and flags
-try:
-    df['Store Opening Delta'] = (df['Store Opening'] - baseline_df.set_index('Store Number').reindex(df['Store Number'])['Store Opening']).dt.days
-    df['Flag'] = df['Store Opening Delta'].apply(lambda x: "Critical" if pd.notna(x) and x >= 5 else "")
-except Exception:
-    df['Store Opening Delta'] = None
-    df['Flag'] = ""
-
-# Filter notes for keywords
-keywords = ["behind schedule", "lagging", "delay", "critical path", "cpm impact", "work on hold", "stop work order",
-            "reschedule", "off track", "schedule drifting", "missed milestone", "budget overrun", "cost impact",
-            "change order pending", "claim submitted", "dispute", "litigation risk", "schedule variance",
-            "material escalation", "labor shortage", "equipment shortage", "low productivity", "rework required",
-            "defects found", "qc failure", "weather delays", "permit delays", "regulatory hurdles",
-            "site access issues", "awaiting sign-off", "conflict", "identified risk", "mitigation", "forecast revised"]
-
-def check_notes(text):
-    text_lower = str(text).lower()
-    return any(kw in text_lower for kw in keywords)
-
-df['Notes'] = df['Notes'].fillna("")
-df['Notes Filtered'] = df['Notes'].apply(lambda x: x if check_notes(x) else "see report below")
-
-summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes Filtered']
-summary_df = df[summary_cols].drop_duplicates(subset=['Store Name']).reset_index(drop=True)
-
-# --- Main screen before password ---
-st.subheader("📋 Submitted Reports Overview")
-submitted_count = len(summary_df)
-st.markdown(f"<h4><span style='color:red;'><b>{submitted_count}</b></span> form responses have been submitted</h4>", unsafe_allow_html=True)
-visible_df = summary_df[['Store Number', 'Store Name', 'CPM', 'Prototype']]
-st.dataframe(visible_df)
-
-st.subheader("🔐 Generate Weekly Summary Report")
-password = st.text_input("Enter Password", type="password")
-
-# Helper to create trend chart figure
-def create_trend_figure(trend_counts):
-    colors = {
-        "pulled in": "#31a354",  # green
-        "pushed": "#de2d26",    # red
-        "held": "#ff7f00",      # orange
-        "baseline": "#6baed6"   # blue
-    }
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.bar(trend_counts.index, trend_counts.values, color=[colors.get(x, "#999") for x in trend_counts.index])
-    ax.set_ylabel("Count")
-    ax.set_xlabel("Trend")
-    ax.set_title("📊 Trend Breakdown")
-    ax.grid(axis='y', linestyle='--', alpha=0.7)
-    plt.tight_layout()
-    return fig
-
-# Convert Matplotlib figure to base64 PNG for embedding
-def fig_to_base64(fig):
-    buf = BytesIO()
-    fig.savefig(buf, format="png", bbox_inches='tight')
-    buf.seek(0)
-    return base64.b64encode(buf.read()).decode()
-
-# Generate full HTML weekly report
-def generate_weekly_summary(df, summary_df, password):
-    if password != "1234":
-        return None, "❌ Incorrect password."
-
-    trend_order = ["pulled in", "pushed", "held", "baseline"]
-    trend_counts = summary_df['Trend'].value_counts().reindex(trend_order, fill_value=0)
-    fig = create_trend_figure(trend_counts)
-    img_base64 = fig_to_base64(fig)
-
-    today = datetime.date.today()
-    week_number = today.isocalendar()[1]
-    year = today.year
-
-    html = [
-        "<html><head><style>",
-        "body{font-family:Arial;padding:20px}",
-        "h1{text-align:center}",
-        "h2{background:#cce5ff;padding:10px;border-radius:4px}",
-        ".entry{border:1px solid #ccc;padding:10px;margin:10px 0;border-radius:4px;background:#f9f9f9}",
-        "ul{margin:0;padding-left:20px}",
-        ".label{font-weight:bold}",
-        "table {border-collapse: collapse; width: 100%; text-align: center;}",
-        "th, td {border: 1px solid #ddd; padding: 8px; text-align: center;}",
-        "th {background-color: #f2f2f2;}",
-        "</style></head><body>",
-        f"<h1>{year} Week: {week_number} Weekly Summary Report</h1>",
-        f'<img src="data:image/png;base64,{img_base64}" style="max-width:600px; display:block; margin:auto;">',
-        "<h2>Trend Summary Table</h2>",
-        trend_counts.rename_axis("Trend").reset_index().rename(columns={"index": "Trend", "Trend": "Count"}).to_html(index=False),
-        "<h2>Detailed Data with Trend</h2>",
-        df[['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes']].to_html(index=False, escape=False),
-        "<hr>",
-        "<h2>Executive Summary</h2>",
-        summary_df.to_html(index=False, escape=False),
-        "<hr>"
-    ]
-
-    group_col = "Subject" if "Subject" in df.columns else "Store Name"
-    for group_name, group_df in df.groupby(group_col):
-        html.append(f"<h2>{group_name}</h2>")
-        for _, row in group_df.iterrows():
-            html.append('<div class="entry"><ul>')
-            html.append(f"<li><span class='label'>Store Name:</span> {row.get('Store Name', '')}</li>")
-            html.append(f"<li><span class='label'>Store Number:</span> {row.get('Store Number', '')}</li>")
-            html.append(f"<li><span class='label'>Prototype:</span> {row.get('Prototype', '')}</li>")
-            html.append(f"<li><span class='label'>CPM:</span> {row.get('CPM', '')}</li>")
-
-            date_fields = ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening"]
-            html.append("<li><span class='label'>Dates:</span><ul>")
-            for field in date_fields:
-                val = row.get(field)
-                Baseline_val = row.get(f"⚪ Baseline {field}")
-                if pd.notna(Baseline_val) and val == Baseline_val:
-                    html.append(f"<li><b style='color:red;'> Baseline</b>: {field} - {val}</li>")
-                else:
-                    html.append(f"<li>{field}: {val}</li>")
-            html.append("</ul></li>")
-
-            notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
-            if notes:
-                html.append("<li><span class='label'>Notes:</span><ul>")
-                html += [f"<li>{n}</li>" for n in notes]
-                html.append("</ul></li>")
-
-            html.append("</ul></div>")
-
-    html.append("</body></html>")
-    return df, "".join(html)
-
-
-if st.button("Generate Report"):
-    df_result, html = generate_weekly_summary(df, summary_df, password)
-    if html is not None:
-        st.markdown("### Weekly Summary")
-        st.components.v1.html(html, height=900, scrolling=True)
-        st.download_button(
-            "Download Summary as HTML",
-            data=html,
-            file_name=f"Weekly_Summary_{datetime.datetime.now().strftime('%Y%m%d')}.html",
-            mime="text/html"
-        )
+def flag(row):
+    if isinstance(row['Store Opening Delta'], int) and row['Store Opening Delta'] > 5:
+        return "<span style='color:red'>*</span>"
     else:
-        st.error(html)
+        return ""
+
+df['Flag'] = df.apply(flag, axis=1)
+
+# --- Trend Categorization ---
+def categorize_trend(row):
+    if isinstance(row['Store Opening Delta'], str):
+        return row['Store Opening Delta']
+    elif row['Store Opening Delta'] > 0:
+        return "Pushed"
+    elif row['Store Opening Delta'] < 0:
+        return "Pulled In"
+    else:
+        return "Held"
+
+df['Trend'] = df.apply(categorize_trend, axis=1)
+
+# --- Trend Summary Table ---
+summary_df = df['Trend'].value_counts().reset_index()
+summary_df.columns = ['Trend', 'Count']
+
+# --- Trend Breakdown Chart ---
+fig = px.pie(summary_df, values='Count', names='Trend', title="Store Opening Trends Breakdown")
+
+# --- HTML Report Generation ---
+def generate_html_report(df, summary_df, fig_html):
+    summary_html = summary_df.to_html(index=False)
+    trend_table_html = df[['Store', 'Prototype', 'Store Opening', '⚪ Baseline Store Opening', 'Store Opening Delta', 'Trend', 'Flag']].to_html(index=False, escape=False)
+
+    html_report = f"""
+    <h2>📊 Store Opening Weekly Report</h2>
+    <h3>Trend Summary</h3>
+    {summary_html}
+    <h3>Trend Breakdown Chart</h3>
+    {fig_html}
+    """
+    return html_report
+
+# Convert Plotly chart to HTML string
+fig_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
+
+# --- Display Report ---
+st.markdown("## 🧾 Executive Summary")
+st.components.v1.html(generate_html_report(df, summary_df, fig_html), height=800, scrolling=True)
