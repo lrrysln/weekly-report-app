@@ -44,9 +44,9 @@ if df.empty:
     st.stop()
 
 # --- Clean & Process Data ---
-df["Timestamp"] = pd.to_datetime(data["Timestamp"])
-df["Week"] = data["Timestamp"].dt.isocalendar().week
-df["Year"] = data["Timestamp"].dt.year
+df["Timestamp"] = pd.to_datetime(df["Timestamp"])
+df["Week"] = df["Timestamp"].dt.isocalendar().week
+df["Year"] = df["Timestamp"].dt.year
 
 # Fix column names if needed
 data.columns = [col.strip() for col in data.columns]
@@ -139,7 +139,7 @@ if password:
     today = datetime.date.today()
     current_week = today.isocalendar()[1]
     current_year = today.year
-    filtered_df = data[(df["Week"] == current_week) & (df["Year"] == current_year)]
+    filtered_df = df[(df["Week"] == current_week) & (df["Year"] == current_year)]
 
     if filtered_df.empty:
         st.warning("⚠️ No data submitted yet for this week.")
