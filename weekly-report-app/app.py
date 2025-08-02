@@ -1,66 +1,71 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import json
-import datetime
 import gspread
+from google.oauth2.service_account import Credentials
+from datetime import datetime
+import json
 
-# ========== GOOGLE SHEETS SETUP ========== #
-info = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
-client = gspread.service_account_from_dict(info)
+# --- Page Config ---
+st.set_page_config(page_title="Weekly Construction Report", layout="wide")
 
-spreadsheet_url = st.secrets["SHEET_URL"]
-spreadsheet = client.open_by_url(spreadsheet_url)
-worksheet = spreadsheet.get_worksheet(0)
-data = worksheet.get_all_records()
+# --- Auth & Google Sheets Setup ---
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
 
-# ========== DATAFRAME SETUP ========== #
-df = pd.DataFrame(data)
-df.columns = df.columns.str.strip()  # Clean up whitespace
+creds = Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"], scopes=SCOPES
+)
+client = gspread.authorize(creds)
 
-# ========== DATE PARSING ========== #
-df["Store Opening"] = pd.to_datetime(df.get("Store Opening"), errors="coerce")
-df["TCO"] = pd.to_datetime(df.get("TCO"), errors="coerce")
-df["Turnover"] = pd.to_datetime(df.get("Turnover"), errors="coerce")
-df["Baseline Parsed"] = pd.to_datetime(df.get("Baseline Store Opening"), errors="coerce")
+SPREADSHEET_ID = "1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w"
+WORKSHEET_NAME = "Sheet1"
 
-# ========== TREND ANALYSIS ========== #
-def detect_trend(group):
-    group = group.sort_values("Week", ascending=True)
-    trends = []
+@st.cache_data(ttl=600)
+def load_data():
+    try:
+        sheet = client.open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET_NAME)
+        data = sheet.get_all_records()
+        df = pd.DataFrame(data)
+        return df
+    except Exception as e:
+        st.error(f"Failed to load data from Google Sheet: {e}")
+        return pd.DataFrame()
 
-    for i in range(1, len(group)):
-        prev = group.iloc[i - 1]["Baseline Parsed"]
-        curr = group.iloc[i]["Baseline Parsed"]
-
-        if pd.isnull(prev) or pd.isnull(curr):
-            trends.append("↔️")
-        elif curr > prev:
-            trends.append("🔺 Delayed")
-        elif curr < prev:
-            trends.append("🔻 Pull Ahead")
-        else:
-            trends.append("↔️ No Change")
-
-    trends.insert(0, "–")  # First row has no previous week to compare
-    group["Trend"] = trends
-    return group
-
-if "Week" in df.columns and "Baseline Parsed" in df.columns:
-    df = df.groupby("Job #", group_keys=False).apply(detect_trend)
-
-# ========== DISPLAY ========== #
-st.title("📊 Construction Weekly Report Summary")
-st.write(f"Last updated: {datetime.datetime.now().strftime('%B %d, %Y %I:%M %p')}")
+df = load_data()
 
 if df.empty:
-    st.warning("No data found in the Google Sheet.")
-else:
-    selected_week = st.selectbox("Select Week", sorted(df["Week"].unique(), reverse=True))
-    filtered_df = df[df["Week"] == selected_week]
+    st.warning("⚠️ No data loaded from Google Sheet yet.")
+    st.stop()
 
-    st.dataframe(filtered_df[[
-        "Week", "Prototype", "Job #", "Store Name",
-        "Baseline Store Opening", "Store Opening", "Trend",
-        "TCO", "Turnover", "PM Notes"
-    ]].sort_values("Prototype"))
+# --- Column Parsing and Cleaning ---
+# Clean column names to avoid unicode issues
+df.columns = df.columns.str.strip().str.replace("⚪", "", regex=False).str.replace(" ", "_")
+
+# Handle date columns
+date_columns = ["Baseline_Store_Opening", "Current_Store_Opening", "Turnover", "TCO"]
+for col in date_columns:
+    if col in df.columns:
+        df[col + "_Parsed"] = pd.to_datetime(df[col], errors="coerce")
+
+# --- Trend Detection Logic ---
+if "Current_Store_Opening_Parsed" in df.columns and "Baseline_Store_Opening_Parsed" in df.columns:
+    df["Opening_Trend"] = (df["Current_Store_Opening_Parsed"] - df["Baseline_Store_Opening_Parsed"]).dt.days
+
+# --- Display Summary ---
+st.title("📈 Weekly Construction Report")
+st.markdown("Showing key trends between Baseline and Current milestones.")
+
+with st.expander("📊 Raw Data Preview", expanded=False):
+    st.dataframe(df)
+
+# --- Highlight Key Trends ---
+if "Opening_Trend" in df.columns:
+    st.subheader("📅 Opening Date Variance (Days)")
+    st.bar_chart(df[["Opening_Trend"]])
+else:
+    st.info("Trend columns not found — check column headers and date format.")
+
+# --- Export or Save (Optional Placeholder) ---
+# You can add exporting logic here if needed (Google Drive, Excel, etc.)
