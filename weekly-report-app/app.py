@@ -8,10 +8,6 @@ import gspread
 import base64
 from io import BytesIO
 import json
-from streamlit.runtime.secrets import secrets
-
-
-
 
 # --- Google Sheets Auth ---
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
