@@ -8,41 +8,47 @@ import gspread
 import base64
 from io import BytesIO
 import json
+import re
 
+# --- Google API Setup ---
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
 
-# Proper way to use Streamlit secrets
 info = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
 creds = Credentials.from_service_account_info(info, scopes=SCOPES)
 client = gspread.authorize(creds)
 
-
 # --- Config ---
 st.set_page_config(layout="wide", page_title="Weekly Construction Report")
 
-# --- Get Data from Google Sheet ---
+# --- Load Sheet ---
 SPREADSHEET_NAME = "Construction Weekly Updates"
 WORKSHEET_NAME = "Form Responses 1"
-
 sheet = client.open(SPREADSHEET_NAME).worksheet(WORKSHEET_NAME)
 data = pd.DataFrame(sheet.get_all_records())
 
-# --- Clean Data ---
+# --- Clean & Process Data ---
 data["Timestamp"] = pd.to_datetime(data["Timestamp"])
 data["Week"] = data["Timestamp"].dt.isocalendar().week
 data["Year"] = data["Timestamp"].dt.year
 
-# --- Auto-calculate Trend ---
-data["Trend"] = data.groupby("Store Number")["Delta Days"].transform(lambda x: x.diff().fillna(0))
+# Fix column names if needed
+data.columns = [col.strip() for col in data.columns]
+
+# Ensure Delta Days is numeric
+data["Delta Days"] = pd.to_numeric(data["Delta Days"], errors="coerce").fillna(0)
+
+# Calculate Trend properly
+data["Trend"] = data.sort_values("Timestamp").groupby("Store Number")["Delta Days"].diff().fillna(0)
 
 # --- Plotting ---
 def create_summary_chart(df):
     chart_data = df.groupby("Store Name")["Delta Days"].mean().sort_values()
     fig, ax = plt.subplots(figsize=(10, 6))
-    chart_data.plot(kind="barh", color=np.where(chart_data > 0, 'red', 'green'), ax=ax)
+    colors = ['red' if val > 0 else 'green' for val in chart_data]
+    chart_data.plot(kind="barh", color=colors, ax=ax)
     ax.set_title("Average Delta Days per Store")
     ax.set_xlabel("Delta Days")
     plt.tight_layout()
@@ -52,10 +58,9 @@ def fig_to_base64(fig):
     buf = BytesIO()
     fig.savefig(buf, format="png")
     buf.seek(0)
-    img_base64 = base64.b64encode(buf.read()).decode("utf-8")
-    return img_base64
+    return base64.b64encode(buf.read()).decode("utf-8")
 
-# --- HTML Generator ---
+# --- HTML Report ---
 def generate_weekly_summary(df, summary_df, fig, password):
     if password != "1234":
         return None, "❌ Incorrect password."
@@ -70,8 +75,8 @@ def generate_weekly_summary(df, summary_df, fig, password):
         "body{font-family:Arial;padding:20px}",
         "h1{text-align:center}",
         "h2{background:#cce5ff;padding:10px;border-radius:4px}",
-        "ul{margin:0;padding-left:20px}",
-        "b.header{font-size:1.2em; display:block; margin-top:15px;}",
+        "ul{margin:0 0 20px;padding-left:20px}",
+        "b.header{font-size:1.4em; display:block; margin-top:20px; margin-bottom:8px;}",
         "</style></head><body>",
         f"<h1>{year} Week: {week_number} Weekly Summary Report</h1>",
         f'<img src="data:image/png;base64,{img_base64}" style="max-width:600px; display:block; margin:auto;">',
@@ -84,20 +89,30 @@ def generate_weekly_summary(df, summary_df, fig, password):
     for group_name, group_df in df.groupby(group_col):
         html.append(f"<h2>{group_name}</h2>")
         for _, row in group_df.iterrows():
-            store_number = row.get("Store Number", "")
-            store_name = row.get("Store Name", "")
-            prototype = row.get("Prototype", "")
-            cpm = row.get("CPM", "")
-            header = f"<b class='header'>{store_number} - {store_name}, {prototype} ({cpm})</b>"
+            # First line: Bold, larger font, not a bullet
+            store_info = f"{row.get('Store Number', '')} - {row.get('Store Name', '')}, {row.get('Prototype', '')} ({row.get('CPM', '')})"
+            html.append(f"<b class='header'>{store_info}</b>")
 
-            bullet_fields = ["Start", "TCO", "Turnover", " Notes"]
-            bullet_items = []
+            # Remaining bullets
+            bullet_fields = ["Start", "TCO", "Turnover", "Notes"]
+            bullets = []
             for field in bullet_fields:
                 val = row.get(field, "")
                 if pd.notna(val) and str(val).strip():
-                    bullet_items.append(f"<li>{field}: {val}</li>")
+                    if field == "Notes":
+                        # Split multiple lines into bullets
+                        note_lines = re.split(r"\n|\r", str(val))
+                        for line in note_lines:
+                            line = line.strip("•-–● ").strip()
+                            if line:
+                                bullets.append(f"<li>{line}</li>")
+                    else:
+                        bullets.append(f"<li>{field}: {val}</li>")
 
-            html.append(f"{header}<ul>{''.join(bullet_items)}</ul>")
+            if bullets:
+                html.append("<ul>")
+                html.extend(bullets)
+                html.append("</ul>")
 
     html.append("</body></html>")
     return df, "".join(html)
@@ -108,17 +123,16 @@ password = st.text_input("Enter admin password to generate report", type="passwo
 
 if password:
     today = datetime.date.today()
-    this_week = today.isocalendar()[1]
-    this_year = today.year
-
-    filtered_df = data[(data["Week"] == this_week) & (data["Year"] == this_year)]
+    current_week = today.isocalendar()[1]
+    current_year = today.year
+    filtered_df = data[(data["Week"] == current_week) & (data["Year"] == current_year)]
 
     if filtered_df.empty:
         st.warning("⚠️ No data submitted yet for this week.")
     else:
-        summary = filtered_df[["Store Name", "Store Number", "Prototype", "CPM", "Delta Days", "Trend"]].drop_duplicates()
+        summary_df = filtered_df[["Store Name", "Store Number", "Prototype", "CPM", "Delta Days", "Trend"]].drop_duplicates()
         fig = create_summary_chart(filtered_df)
-        df_out, html_report = generate_weekly_summary(filtered_df, summary, fig, password)
+        df_out, html_report = generate_weekly_summary(filtered_df, summary_df, fig, password)
 
         if html_report:
             st.markdown(html_report, unsafe_allow_html=True)
