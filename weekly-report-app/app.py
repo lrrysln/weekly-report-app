@@ -95,7 +95,6 @@ combined = pd.concat([baseline_df, current_df], ignore_index=True)
 st.subheader("📋 Store Opening Trend Table")
 st.subheader("🔎 Debug: Current Merged with Baseline")
 st.write(current_df[["Store Name", "Store Number", "Store Opening", "Baseline Opening"]])
-]])
 
 # --- Plot Trend Counts ---
 st.subheader("📊 Store Opening Trend Summary")
