@@ -33,24 +33,106 @@ def load_data():
 
 df = load_data()
 
-# Convert 'Year Week' (which we assume contains a date) into datetime, then extract year/week
-df['Year Week'] = pd.to_datetime(df['Year Week'], errors='coerce')
+# ✅ Clean column headers
+df.columns = df.columns.str.strip()
 
-# Create new column 'Week Label' like "2025 week 31"
-df['Week Label'] = df['Year Week'].dt.strftime('%G week %V')  # ISO year and ISO week
+# ✅ Convert first column to datetime
+first_column_name = df.columns[0]
+df[first_column_name] = pd.to_datetime(df[first_column_name], errors='coerce')
 
-# Show submission count per week label
-weekly_counts = df['Week Label'].value_counts().sort_index(ascending=False)
+# ✅ Create new column for "Year Week"
+df['Year Week'] = df[first_column_name].dt.strftime('%Y Week %U')
 
+# ✅ Create "Week Label" using ISO week and year format (e.g., 2025 week 31)
+df['Week Label'] = df[first_column_name].dt.strftime('%G week %V')
+
+# ✅ Use Week Label as display label
+df['Week of Submission'] = df['Week Label']
+
+# ✅ Count submissions per week
+weekly_counts = df['Week of Submission'].value_counts().sort_index(ascending=False)
+
+# ✅ Display in Streamlit
 st.subheader("🗓️ Weekly Submission Volume")
 st.dataframe(
-    weekly_counts.reset_index().rename(columns={
-        'index': 'Week of Submission',
-        'Week Label': 'Form Count'
-    }),
+    weekly_counts.reset_index().rename(columns={'index': 'Week of Submission', 'Week of Submission': 'Form Count'}),
     use_container_width=True
 )
 
-# Optional: show the full table with each row's "Week Label"
-with st.expander("📋 View All Submissions with Week Labels"):
-    st.dataframe(df[['Store Name', 'Store Number', 'Year Week', 'Week Label']], use_container_width=True)
+# Format store names
+df['Store Name'] = df['Store Name'].str.title()
+
+# Convert date columns to datetime
+df['Store Opening'] = pd.to_datetime(df['Store Opening'], errors='coerce')
+df['Baseline'] = df['Baseline'].astype(str).str.strip()
+df['Store Number'] = df['Store Number'].astype(str).str.strip()
+
+# Separate baseline & non-baseline entries
+baseline_df = df[df['Baseline'] == "/True"].copy()
+baseline_map = baseline_df.set_index('Store Number')['Store Opening'].to_dict()
+
+# Trend calculation
+def compute_trend(row):
+    store_number = row['Store Number']
+    current_open = row['Store Opening']
+    if row['Baseline'] == "/True":
+        return "baseline"
+    baseline_open = baseline_map.get(store_number)
+    if pd.isna(current_open) or pd.isna(baseline_open):
+        return "no baseline dates"
+    if current_open > baseline_open:
+        return "pushed"
+    elif current_open < baseline_open:
+        return "pulled in"
+    else:
+        return "held"
+
+df['Trend'] = df.apply(compute_trend, axis=1)
+
+# Calculate delta
+def compute_delta(row):
+    baseline_open = baseline_map.get(row['Store Number'])
+    if pd.isna(row['Store Opening']) or pd.isna(baseline_open):
+        return 0
+    return (row['Store Opening'] - baseline_open).days
+
+df['Store Opening Delta'] = df.apply(compute_delta, axis=1)
+
+# Flag logic with red asterisk
+def flag_delta(delta):
+    if isinstance(delta, int) and abs(delta) > 5:
+        return '<span style="color:red;font-weight:bold;">*</span>'
+    return ""
+
+df['Flag'] = df['Store Opening Delta'].apply(flag_delta)
+
+# Filter notes for keywords
+keywords = ["behind schedule", "lagging", "delay", "critical path", "cpm impact", "work on hold", "stop work order",
+            "reschedule", "off track", "schedule drifting", "missed milestone", "budget overrun", "cost impact",
+            "change order pending", "claim submitted", "dispute", "litigation risk", "schedule variance",
+            "material escalation", "labor shortage", "equipment shortage", "low productivity", "rework required",
+            "defects found", "qc failure", "weather delays", "permit delays", "regulatory hurdles",
+            "site access issues", "awaiting sign-off", "conflict", "identified risk", "mitigation", "forecast revised"]
+
+def check_notes(text):
+    text_lower = str(text).lower()
+    return any(kw in text_lower for kw in keywords)
+
+df['Notes'] = df['Notes'].fillna("")
+df['Notes Filtered'] = df['Notes'].apply(lambda x: x if check_notes(x) else "see report below")
+
+summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes Filtered']
+summary_df = df[summary_cols].drop_duplicates(subset=['Store Number']).reset_index(drop=True)
+
+# ✅ Main Display (Now includes Week Label)
+st.subheader("📋 Submitted Reports Overview")
+st.markdown(f"<h4><span style='color:red;'><b>{len(df)}</b></span> form responses have been submitted</h4>", unsafe_allow_html=True)
+st.dataframe(df[['Store Number', 'Store Name', 'CPM', 'Prototype', 'Week Label']], use_container_width=True)
+
+# 🔐 Password-protected report generation
+st.subheader("🔐 Generate Weekly Summary Report")
+password = st.text_input("Enter Password", type="password")
+
+# (Chart, summary report, and download functions unchanged...)
+
+# [Add your report generation and download logic here as in your full script]
