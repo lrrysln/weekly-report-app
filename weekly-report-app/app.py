@@ -103,7 +103,7 @@ df['Notes'] = df['Notes'].fillna("")
 df['Notes Filtered'] = df['Notes'].apply(lambda x: x if check_notes(x) else "see report below")
 
 summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes Filtered']
-summary_df = df[summary_cols].drop_duplicates(subset=['Store Name', 'Year Week']).reset_index(drop=True)
+summary_df = df[summary_cols].drop_duplicates(subset=['Store Name']).reset_index(drop=True)
 
 # Main Display
 st.subheader("📋 Submitted Reports Overview")
@@ -190,12 +190,12 @@ def generate_weekly_summary(df, summary_df, password):
                     val = val.strftime("%m/%d/%y")
                 baseline_val = row.get(f"⚪ Baseline {field}")
                 if pd.notna(baseline_val) and val == baseline_val:
-                    html.append(f"<li style='margin-left: 20px;'><b style='color:red;'>Baseline</b>: {field} - {val}</li>")
+                    html.append(f"<li><b style='color:red;'> Baseline</b>: {field} - {val}</li>")
                 else:
-                    html.append(f"<li style='margin-left: 20px;'>{field}: {val}</li>")
+                    html.append(f"<li>{field}: {val}</li>")
             html.append("</ul></li>")
 
-            notes = [re.sub(r"^[\\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
+            notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
             if notes:
                 html.append("<li><span class='label'>Notes:</span><ul>")
                 html += [f"<li style='margin-left: 40px;'>{n}</li>" for n in notes]
@@ -218,5 +218,8 @@ if st.button("Generate Report"):
             mime="text/html",
             use_container_width=True
         )
+
     else:
         st.error(html)
+
+
