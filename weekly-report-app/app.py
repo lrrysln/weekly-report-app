@@ -1,12 +1,8 @@
 import streamlit as st
 import pandas as pd
 import datetime
-import re
-import matplotlib.pyplot as plt
 import gspread
 from google.oauth2.service_account import Credentials
-import base64
-from io import BytesIO
 
 # --- Auth & Google Sheets Setup ---
 SCOPES = [
@@ -45,14 +41,16 @@ df['Store Name'] = df['Store Name'].str.title()
 
 # Convert date columns to datetime
 df['Store Opening'] = pd.to_datetime(df['Store Opening'], errors='coerce')
-df['Baseline'] = df['Baseline'].astype(str).str.strip()
-df['Store Number'] = df['Store Number'].astype(str).str.strip()
+df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')  # Assuming this is the submission time
 
-# Generate Week Label
-df['Week Label'] = df['Store Opening'].dt.strftime('%Y week %U')
-df['Year'] = df['Store Opening'].dt.year
+# Generate correct Week Label from submission time
+df['Year'] = df['Timestamp'].dt.year
+df['Week Number'] = df['Timestamp'].dt.isocalendar().week
+df['Week Label'] = df['Year'].astype(str) + " week " + df['Week Number'].astype(str)
 
 # Separate baseline & non-baseline entries
+df['Baseline'] = df['Baseline'].astype(str).str.strip()
+df['Store Number'] = df['Store Number'].astype(str).str.strip()
 baseline_df = df[df['Baseline'] == "/True"].copy()
 baseline_map = baseline_df.set_index('Store Number')['Store Opening'].to_dict()
 
@@ -73,9 +71,10 @@ for year in years:
 
 # Show current week's data
 current_date = datetime.datetime.now()
-current_week_label = current_date.strftime('%Y week %U')
 current_year = current_date.year
+current_week_number = current_date.isocalendar()[1]
+current_week_label = f"{current_year} week {current_week_number}"
 current_week_df = df[df['Week Label'] == current_week_label]
 
-st.markdown(f"### 📋 {len(current_week_df)} Submissions for the week of {current_date.strftime('%B %d')} (week {current_date.strftime('%U')} of the year), {current_year}")
+st.markdown(f"### 📋 {len(current_week_df)} Submissions for the week of {current_date.strftime('%B %d')} (week {current_week_number} of the year), {current_year}")
 st.dataframe(current_week_df.reset_index(drop=True))
