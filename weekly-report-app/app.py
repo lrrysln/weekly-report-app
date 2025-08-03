@@ -54,7 +54,7 @@ if df.empty:
     st.stop()
 
 # --- Clean & Format ---
-df["Week Ending"] = pd.to_datetime(df["Week Ending"], errors="coerce")
+df["Year Week"] = pd.to_datetime(df["Year Week"], errors="coerce")
 df["Store Opening"] = pd.to_datetime(df["Store Opening"], errors="coerce")
 df["Baseline Store Opening"] = pd.to_datetime(df["Baseline Store Opening"], errors="coerce")
 
