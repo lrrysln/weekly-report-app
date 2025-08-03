@@ -33,31 +33,37 @@ def load_data():
 
 df = load_data()
 
-# ✅ Clean column headers
-df.columns = df.columns.str.strip()
+# Ensure we have data
+if df.empty:
+    st.stop()
 
-# ✅ Convert first column to datetime
+# Identify the first column (assumed to be date)
 first_column_name = df.columns[0]
+
+# Convert to datetime safely
 df[first_column_name] = pd.to_datetime(df[first_column_name], errors='coerce')
 
-# ✅ Create new column for "Year Week"
-df['Year Week'] = df[first_column_name].dt.strftime('%Y Week %U')
+# Drop rows where date is invalid
+df = df.dropna(subset=[first_column_name])
 
-# ✅ Create "Week Label" using ISO week and year format (e.g., 2025 week 31)
+# Create a "Week Label" like "2025 week 31"
 df['Week Label'] = df[first_column_name].dt.strftime('%G week %V')
 
-# ✅ Use Week Label as display label
-df['Week of Submission'] = df['Week Label']
+# Display weekly submission counts
+weekly_counts = df['Week Label'].value_counts().sort_index(ascending=False)
 
-# ✅ Count submissions per week
-weekly_counts = df['Week of Submission'].value_counts().sort_index(ascending=False)
-
-# ✅ Display in Streamlit
 st.subheader("🗓️ Weekly Submission Volume")
 st.dataframe(
-    weekly_counts.reset_index().rename(columns={'index': 'Week of Submission', 'Week of Submission': 'Form Count'}),
+    weekly_counts.reset_index().rename(columns={
+        'index': 'Week of Submission',
+        'Week Label': 'Form Count'
+    }),
     use_container_width=True
 )
+
+# Optional: Show full data with the new "Week Label"
+with st.expander("📄 Full Submission Table with Week Labels"):
+    st.dataframe(df, use_container_width=True)
 
 # Format store names
 df['Store Name'] = df['Store Name'].str.title()
