@@ -33,7 +33,19 @@ def load_data():
 
 # Create "Week of Submission" column
 df['Submission Timestamp'] = pd.to_datetime(df['Year Week'], errors='coerce', utc=True)
-df['Week of Submission'] = df['Submission Timestamp'].dt.strftime('%Y Week %U')
+# Extract week and year safely from "Year Week" column
+df['Week of Submission'] = df['Year Week'].astype(str)
+
+# Display number of forms submitted by week
+weekly_counts = df['Week of Submission'].value_counts().sort_index(ascending=False)
+
+st.subheader("🗓️ Weekly Submission Volume")
+st.dataframe(
+    weekly_counts.reset_index().rename(columns={'index': 'Week of Submission', 'Week of Submission': 'Form Count'}),
+    use_container_width=True
+)
+# Extract week and year safely from "Year Week" column
+df['Week of Submission'] = df['Year Week'].astype(str)
 
 # Display number of forms submitted by week
 weekly_counts = df['Week of Submission'].value_counts().sort_index(ascending=False)
