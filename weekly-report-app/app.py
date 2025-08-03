@@ -191,18 +191,24 @@ def generate_weekly_summary(df, summary_df, password):
             cpm = row.get('CPM', '')
             html.append(f"<div style='font-weight:bold; font-size:1.2em;'>{store_number} - {store_name}, {prototype} ({cpm})</div>")
 
-            date_fields = ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening"]
-            html.append("<li><span class='label'>Dates:</span><ul>")
-            for field in date_fields:
-                val = row.get(field)
-                if isinstance(val, (datetime.datetime, datetime.date)):
-                    val = val.strftime("%m/%d/%y")
-                baseline_val = row.get(f"⚪ Baseline {field}")
-                if pd.notna(baseline_val) and val == baseline_val:
-                    html.append(f"<li><b style='color:red;'> Baseline</b>: {field} - {val}</li>")
-                else:
-                    html.append(f"<li>{field}: {val}</li>")
-            html.append("</ul></li>")
+date_fields = ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening"]
+html.append("<li><span class='label'>Dates:</span><ul>")
+for field in date_fields:
+    val = row.get(field)
+
+    # Check if the value is a valid date before formatting
+    if isinstance(val, (datetime.datetime, datetime.date)) and pd.notna(val):
+        val_str = val.strftime("%m/%d/%y")
+    else:
+        val_str = ""  # or "N/A" if you'd prefer
+
+    baseline_val = row.get(f"⚪ Baseline {field}")
+    
+    if pd.notna(baseline_val) and val_str == baseline_val:
+        html.append(f"<li><b style='color:red;'> Baseline</b>: {field} - {val_str}</li>")
+    else:
+        html.append(f"<li>{field}: {val_str}</li>")
+html.append("</ul></li>")
 
             notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
             if notes:
