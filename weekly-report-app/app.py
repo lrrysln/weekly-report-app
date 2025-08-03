@@ -100,23 +100,10 @@ def check_notes(text):
     return any(kw in text_lower for kw in keywords)
 
 df['Notes'] = df['Notes'].fillna("")
-
-st.markdown(f"<h4><span style='color:green;'><b>{len(df)}</b></span> entries found for <b>Week {current_week}</b> of <b>{current_year}</b>.</h4>", unsafe_allow_html=True)
-
 df['Notes Filtered'] = df['Notes'].apply(lambda x: x if check_notes(x) else "see report below")
 
 summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes Filtered']
 summary_df = df[summary_cols].drop_duplicates(subset=['Store Number']).reset_index(drop=True)
-
-# Filter entries for the current ISO week and year
-today = datetime.date.today()
-current_year, current_week, _ = today.isocalendar()
-
-df['Store Opening Week'] = df['Store Opening'].dt.isocalendar().week
-df['Store Opening Year'] = df['Store Opening'].dt.isocalendar().year
-
-df = df[(df['Store Opening Week'] == current_week) & (df['Store Opening Year'] == current_year)]
-
 
 # Main Display
 st.subheader("📋 Submitted Reports Overview")
