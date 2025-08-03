@@ -33,47 +33,40 @@ if df.empty:
     st.warning("⚠️ No data loaded from Google Sheet yet.")
     st.stop()
 
-# Show the available columns for debugging
-st.write("🧪 Available Columns:", df.columns.tolist())
-
 # Clean column names
 df.columns = df.columns.str.strip()
 
-# Try to use an appropriate timestamp column
-timestamp_col = None
-for col in df.columns:
-    if "timestamp" in col.lower() or "submission" in col.lower():
-        timestamp_col = col
-        break
+# Show available columns for reference
+st.write("🧪 Available Columns:", df.columns.tolist())
 
-if timestamp_col is None:
-    st.error("❌ No submission date or timestamp column found. Please check your Google Sheet.")
+# --- Use 'Year Week' as timestamp ---
+if 'Year Week' not in df.columns:
+    st.error("❌ Column 'Year Week' not found in data. Cannot calculate week label.")
     st.stop()
 
-# Convert that column to datetime and calculate Week Label
-df[timestamp_col] = pd.to_datetime(df[timestamp_col], errors='coerce')
-df['Week Label'] = df[timestamp_col].dt.strftime('%Y week %U')
-df['Year'] = df[timestamp_col].dt.year
+df['Year Week'] = pd.to_datetime(df['Year Week'], errors='coerce')
 
-# Format store names
+# Use ISO week format (Monday start, standard business)
+df['Week Label'] = df['Year Week'].dt.strftime('%G Week %V')
+df['Year'] = df['Year Week'].dt.isocalendar().year
+
+# Optional: Format store names and clean up strings
 if 'Store Name' in df.columns:
     df['Store Name'] = df['Store Name'].str.title()
 
-# Clean up data
 if 'Store Number' in df.columns:
     df['Store Number'] = df['Store Number'].astype(str).str.strip()
 
 if 'Baseline' in df.columns:
     df['Baseline'] = df['Baseline'].astype(str).str.strip()
 
-# Separate baseline entries
+# Baseline mapping (for reference)
 baseline_df = df[df.get('Baseline') == "/True"].copy()
 baseline_map = baseline_df.set_index('Store Number')['Week Label'].to_dict()
 
-# Weekly counts
-df_weekly_counts = df.groupby(['Year', 'Week Label']).size().reset_index(name='Count')
+# --- Weekly Overview Section ---
+st.markdown("## 🗓️ Weekly Submission Volume by Year")
 
-# Expand by Year > Week
 years = sorted(df['Year'].dropna().unique(), reverse=True)
 for year in years:
     with st.expander(f"📁 {year}"):
@@ -85,11 +78,13 @@ for year in years:
             with st.expander(f"📆 {week} — {count} submission(s)"):
                 st.dataframe(year_data[year_data['Week Label'] == week].reset_index(drop=True))
 
-# Current week
+# --- Current Week's Data ---
 current_date = datetime.datetime.now()
-current_week_label = current_date.strftime('%Y week %U')
-current_year = current_date.year
+current_iso = current_date.isocalendar()
+current_week_label = f"{current_iso.year} Week {current_iso.week:02d}"
+current_year = current_iso.year
+
 current_week_df = df[df['Week Label'] == current_week_label]
 
-st.markdown(f"### 📋 {len(current_week_df)} Submissions for the week of {current_date.strftime('%B %d')} (week {current_date.strftime('%U')} of the year), {current_year}")
+st.markdown(f"### 📋 {len(current_week_df)} Submissions for the week of {current_date.strftime('%B %d')} (week {current_iso.week} of the year), {current_year}")
 st.dataframe(current_week_df.reset_index(drop=True))
