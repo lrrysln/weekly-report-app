@@ -31,14 +31,18 @@ def load_data():
         st.error(f"Failed to load data from Google Sheet: {e}")
         return pd.DataFrame()
 
-df = load_data()
+# Create "Week of Submission" column
+df['Submission Timestamp'] = pd.to_datetime(df['Year Week'], errors='coerce', utc=True)
+df['Week of Submission'] = df['Submission Timestamp'].dt.strftime('%Y Week %U')
 
-if df.empty:
-    st.warning("⚠️ No data loaded from Google Sheet yet.")
-    st.stop()
+# Display number of forms submitted by week
+weekly_counts = df['Week of Submission'].value_counts().sort_index(ascending=False)
 
-# Clean column names
-df.columns = df.columns.str.strip()
+st.subheader("🗓️ Weekly Submission Volume")
+st.dataframe(
+    weekly_counts.reset_index().rename(columns={'index': 'Week of Submission', 'Week of Submission': 'Form Count'}),
+    use_container_width=True
+)
 
 # Format store names
 df['Store Name'] = df['Store Name'].str.title()
@@ -50,34 +54,25 @@ df['Store Number'] = df['Store Number'].astype(str).str.strip()
 
 # Separate baseline & non-baseline entries
 baseline_df = df[df['Baseline'] == "/True"].copy()
-baseline_df_sorted = baseline_df.sort_values(by='Store Opening', ascending=False)
-baseline_map = baseline_df_sorted.drop_duplicates(subset='Store Number', keep='first')\
-                                 .set_index('Store Number')['Store Opening'].to_dict()
+baseline_map = baseline_df.set_index('Store Number')['Store Opening'].to_dict()
 
 # Trend calculation
 def compute_trend(row):
     store_number = row['Store Number']
     current_open = row['Store Opening']
-    
     if row['Baseline'] == "/True":
         return "baseline"
-    
     baseline_open = baseline_map.get(store_number)
-    
     if pd.isna(current_open) or pd.isna(baseline_open):
         return "no baseline dates"
-    
     if current_open > baseline_open:
         return "pushed"
     elif current_open < baseline_open:
         return "pulled in"
-    elif current_open == baseline_open:
+    else:
         return "held"
-    
-    return "no baseline dates"
 
 df['Trend'] = df.apply(compute_trend, axis=1)
-
 
 # Calculate delta
 def compute_delta(row):
@@ -195,17 +190,13 @@ def generate_weekly_summary(df, summary_df, password):
             html.append("<li><span class='label'>Dates:</span><ul>")
             for field in date_fields:
                 val = row.get(field)
-
-                if isinstance(val, (datetime.datetime, datetime.date)) and pd.notna(val):
-                    val_str = val.strftime("%m/%d/%y")
-                else:
-                    val_str = ""
-
+                if isinstance(val, (datetime.datetime, datetime.date)):
+                    val = val.strftime("%m/%d/%y")
                 baseline_val = row.get(f"⚪ Baseline {field}")
-                if pd.notna(baseline_val) and val_str == baseline_val:
-                    html.append(f"<li><b style='color:red;'> Baseline</b>: {field} - {val_str}</li>")
+                if pd.notna(baseline_val) and val == baseline_val:
+                    html.append(f"<li><b style='color:red;'> Baseline</b>: {field} - {val}</li>")
                 else:
-                    html.append(f"<li>{field}: {val_str}</li>")
+                    html.append(f"<li>{field}: {val}</li>")
             html.append("</ul></li>")
 
             notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
@@ -218,7 +209,6 @@ def generate_weekly_summary(df, summary_df, password):
 
     html.append("</body></html>")
     return df, "".join(html)
-
 
 if st.button("Generate Report"):
     df_result, html = generate_weekly_summary(df, summary_df, password)
