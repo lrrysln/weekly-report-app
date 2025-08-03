@@ -1,4 +1,3 @@
-# ✨ START OF SCRIPT
 import streamlit as st
 import pandas as pd
 import datetime
