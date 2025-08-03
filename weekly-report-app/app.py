@@ -31,21 +31,10 @@ def load_data():
         st.error(f"Failed to load data from Google Sheet: {e}")
         return pd.DataFrame()
 
+df = load_data()
+
 # Use "Year Week" as a plain label for display purposes
 df['Week of Submission'] = df['Year Week'].astype(str).str.strip()
-# Extract week and year safely from "Year Week" column
-df['Week of Submission'] = df['Year Week'].astype(str)
-
-# Display number of forms submitted by week
-weekly_counts = df['Week of Submission'].value_counts().sort_index(ascending=False)
-
-st.subheader("🗓️ Weekly Submission Volume")
-st.dataframe(
-    weekly_counts.reset_index().rename(columns={'index': 'Week of Submission', 'Week of Submission': 'Form Count'}),
-    use_container_width=True
-)
-# Extract week and year safely from "Year Week" column
-df['Week of Submission'] = df['Year Week'].astype(str)
 
 # Display number of forms submitted by week
 weekly_counts = df['Week of Submission'].value_counts().sort_index(ascending=False)
