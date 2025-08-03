@@ -103,12 +103,12 @@ df['Notes'] = df['Notes'].fillna("")
 df['Notes Filtered'] = df['Notes'].apply(lambda x: x if check_notes(x) else "see report below")
 
 summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes Filtered']
-summary_df = df[summary_cols].drop_duplicates(subset=['Store Name']).reset_index(drop=True)
+summary_df = df[summary_cols].drop_duplicates(subset=['Store Number']).reset_index(drop=True)
 
 # Main Display
 st.subheader("📋 Submitted Reports Overview")
-st.markdown(f"<h4><span style='color:red;'><b>{len(summary_df)}</b></span> form responses have been submitted</h4>", unsafe_allow_html=True)
-st.dataframe(summary_df[['Store Number', 'Store Name', 'CPM', 'Prototype']], use_container_width=True)
+st.markdown(f"<h4><span style='color:red;'><b>{len(df)}</b></span> form responses have been submitted</h4>", unsafe_allow_html=True)
+st.dataframe(df[['Store Number', 'Store Name', 'CPM', 'Prototype']], use_container_width=True)
 
 st.subheader("🔐 Generate Weekly Summary Report")
 password = st.text_input("Enter Password", type="password")
@@ -218,8 +218,5 @@ if st.button("Generate Report"):
             mime="text/html",
             use_container_width=True
         )
-
     else:
         st.error(html)
-
-
