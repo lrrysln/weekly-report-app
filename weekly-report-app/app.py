@@ -31,8 +31,8 @@ def load_data():
         st.error(f"Failed to load data from Google Sheet: {e}")
         return pd.DataFrame()
 
-# Create "Week of Submission" column
-df['Submission Timestamp'] = pd.to_datetime(df['Year Week'], errors='coerce', utc=True)
+# Use "Year Week" as a plain label for display purposes
+df['Week of Submission'] = df['Year Week'].astype(str).str.strip()
 # Extract week and year safely from "Year Week" column
 df['Week of Submission'] = df['Year Week'].astype(str)
 
