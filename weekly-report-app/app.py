@@ -40,7 +40,7 @@ if not st.session_state.authenticated:
         password = st.text_input("Enter password to view report", type="password")
         submitted = st.form_submit_button("Submit")
         if submitted:
-            if password == "1234":
+            if password == "1234":  # <-- Update your real password here
                 st.session_state.authenticated = True
             else:
                 st.error("Incorrect password")
@@ -54,13 +54,12 @@ if df.empty:
     st.stop()
 
 # --- Clean & Format ---
-df["Year Week"] = pd.to_datetime(df["Year Week"], errors="coerce")
 df["Store Opening"] = pd.to_datetime(df["Store Opening"], errors="coerce")
-df["Baseline Store Opening"] = pd.to_datetime(df["Baseline Store Opening"], errors="coerce")
+df["Baseline"] = pd.to_datetime(df["Baseline"], errors="coerce")
 
 # --- Trend Logic ---
 def calculate_trend(row):
-    baseline = row["Baseline Store Opening"]
+    baseline = row["Baseline"]
     current = row["Store Opening"]
     if pd.isna(baseline):
         return "no baseline dates"
@@ -72,7 +71,7 @@ def calculate_trend(row):
         return "held"
 
 def calculate_delta(row):
-    baseline = row["Baseline Store Opening"]
+    baseline = row["Baseline"]
     current = row["Store Opening"]
     if pd.isna(baseline):
         return None
@@ -106,8 +105,11 @@ st.plotly_chart(fig, use_container_width=True)
 
 # --- Export HTML Report (Optional) ---
 with st.expander("📄 HTML Summary (Optional)"):
-    html_table = df[["Prototype", "Store #", "Store Name", "Store Opening", "Baseline Store Opening", "Store Opening Δ", "Store Opening Trend", "⚑"]].copy()
+    html_table = df[[
+        "Prototype", "Store Number", "Store Name", "Store Opening", "Baseline", "Store Opening Δ", "Store Opening Trend", "⚑"
+    ]].copy()
+
     html_table["Store Opening"] = html_table["Store Opening"].dt.strftime("%m/%d/%y")
-    html_table["Baseline Store Opening"] = html_table["Baseline Store Opening"].dt.strftime("%m/%d/%y")
+    html_table["Baseline"] = html_table["Baseline"].dt.strftime("%m/%d/%y")
     html_html = html_table.to_html(escape=False, index=False)
     st.markdown(html_html, unsafe_allow_html=True)
