@@ -50,25 +50,34 @@ df['Store Number'] = df['Store Number'].astype(str).str.strip()
 
 # Separate baseline & non-baseline entries
 baseline_df = df[df['Baseline'] == "/True"].copy()
-baseline_map = baseline_df.set_index('Store Number')['Store Opening'].to_dict()
+baseline_df_sorted = baseline_df.sort_values(by='Store Opening', ascending=False)
+baseline_map = baseline_df_sorted.drop_duplicates(subset='Store Number', keep='first')\
+                                 .set_index('Store Number')['Store Opening'].to_dict()
 
 # Trend calculation
 def compute_trend(row):
     store_number = row['Store Number']
     current_open = row['Store Opening']
+    
     if row['Baseline'] == "/True":
         return "baseline"
+    
     baseline_open = baseline_map.get(store_number)
+    
     if pd.isna(current_open) or pd.isna(baseline_open):
         return "no baseline dates"
+    
     if current_open > baseline_open:
         return "pushed"
     elif current_open < baseline_open:
         return "pulled in"
-    else:
+    elif current_open == baseline_open:
         return "held"
+    
+    return "no baseline dates"
 
 df['Trend'] = df.apply(compute_trend, axis=1)
+
 
 # Calculate delta
 def compute_delta(row):
