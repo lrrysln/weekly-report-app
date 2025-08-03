@@ -33,12 +33,24 @@ def load_data():
 
 df = load_data()
 
-# Use "Year Week" as a plain label for display purposes
-df['Week of Submission'] = df['Year Week'].astype(str).str.strip()
+# ✅ Clean column headers
+df.columns = df.columns.str.strip()
 
-# Display number of forms submitted by week
+# ✅ Convert first column to datetime
+first_column_name = df.columns[0]
+df[first_column_name] = pd.to_datetime(df[first_column_name], errors='coerce')
+
+# ✅ Create new column for "Year Week"
+df['Year Week'] = df[first_column_name].dt.strftime('%Y Week %U')  # %U = Week number, Sunday as first day
+# OR use ISO calendar: df['Year Week'] = df[first_column_name].dt.isocalendar().apply(lambda x: f"{x['year']} Week {x['week']:02}", axis=1)
+
+# ✅ Use Year Week as display label
+df['Week of Submission'] = df['Year Week']
+
+# ✅ Count submissions per week
 weekly_counts = df['Week of Submission'].value_counts().sort_index(ascending=False)
 
+# ✅ Display in Streamlit
 st.subheader("🗓️ Weekly Submission Volume")
 st.dataframe(
     weekly_counts.reset_index().rename(columns={'index': 'Week of Submission', 'Week of Submission': 'Form Count'}),
