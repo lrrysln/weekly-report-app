@@ -170,9 +170,6 @@ def generate_weekly_summary(df, summary_df, password):
         f'<img src="data:image/png;base64,{img_base64}" style="max-width:600px; display:block; margin:auto;">',
         "<h2>Trend Summary Table</h2>",
         trend_counts.rename_axis("Trend").reset_index().rename(columns={"index": "Trend", "Trend": "Count"}).to_html(index=False),
-        "<h2>Detailed Data with Trend</h2>",
-        df[['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes']].to_html(index=False, escape=False),
-        "<hr>",
         "<h2>Executive Summary</h2>",
         summary_df.to_html(index=False, escape=False),
         "<hr>"
@@ -182,11 +179,14 @@ def generate_weekly_summary(df, summary_df, password):
     for group_name, group_df in df.groupby(group_col):
         html.append(f"<h2>{group_name}</h2>")
         for _, row in group_df.iterrows():
-            html.append('<div class="entry"><ul>')
-            html.append(f"<li><span class='label'>Store Name:</span> {row.get('Store Name', '')}</li>")
-            html.append(f"<li><span class='label'>Store Number:</span> {row.get('Store Number', '')}</li>")
-            html.append(f"<li><span class='label'>Prototype:</span> {row.get('Prototype', '')}</li>")
-            html.append(f"<li><span class='label'>CPM:</span> {row.get('CPM', '')}</li>")
+            store_number = row.get('Store Number', '')
+            store_name = row.get('Store Name', '')
+            prototype = row.get('Prototype', '')
+            cpm = row.get('CPM', '')
+            
+            info_line = f"<div style='font-weight:bold; font-size:1.2em;'>{store_number} - {store_name}, {prototype} ({cpm})</div>"
+            html.append(info_line)
+
 
             date_fields = ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening"]
             html.append("<li><span class='label'>Dates:</span><ul>")
