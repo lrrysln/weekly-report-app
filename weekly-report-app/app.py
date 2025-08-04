@@ -186,11 +186,3 @@ for year in years:
 # Optional footer
 st.markdown("<br><hr><p style='text-align:center;'>Construction Weekly Tracker • © 2025</p>", unsafe_allow_html=True)
 
-
-
-
-st.write("Today:", today)
-st.write("Start of week:", start_of_week)
-st.write("End of week:", end_of_week)
-st.write("Dates in df:", df['Date'].dropna().head(10).tolist())
-st.write("Rows in current week df:", len(current_week_df))
