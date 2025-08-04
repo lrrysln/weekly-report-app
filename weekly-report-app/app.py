@@ -1,4 +1,3 @@
-Provides week of the year column; along with a list of entries for the week
 import streamlit as st
 import pandas as pd
 import datetime
@@ -36,6 +35,9 @@ if df.empty:
 
 # Clean column names
 df.columns = df.columns.str.strip()
+
+# Show available columns for reference
+st.write("🧪 Available Columns:", df.columns.tolist())
 
 # --- Use 'Year Week' as timestamp ---
 if 'Year Week' not in df.columns:
