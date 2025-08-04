@@ -258,3 +258,8 @@ else:
         st.error("❌ Incorrect password.")
     else:
         st.info("Please enter the password and click Submit to view the full report.")
+
+
+st.write("Sample baseline map entries:", list(baseline_map.items())[:5])
+st.write("Sample Store Opening values:", df['Store Opening'].head())
+st.write("Unique Baseline values:", df['Baseline'].unique())
