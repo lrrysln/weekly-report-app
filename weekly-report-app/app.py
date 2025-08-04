@@ -102,7 +102,8 @@ if password == "1234":
     baseline_map = baseline_df.set_index('Store Number')['Store Opening'].to_dict()
 
     # Convert Store Opening column to datetime for full df
-    df['Store Opening'] = pd.to_datetime(df['Store Opening'], errors='coerce')
+    df['Store Opening'] = pd.to_datetime(df['Store Opening'], errors='coerce').dt.normalize()
+    baseline_df['Store Opening'] = pd.to_datetime(baseline_df['Store Opening'], errors='coerce').dt.normalize()
 
     # Calculate trends
     def compute_trend(row):
@@ -157,7 +158,13 @@ if password == "1234":
     df['Notes Filtered'] = df['Notes'].apply(lambda x: x if check_notes(x) else "see report below")
 
     summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes Filtered']
-    summary_df = df[summary_cols].drop_duplicates(subset=['Store Number']).reset_index(drop=True)
+   
+    # Get latest entry per Store Number by Year Week (or Date)
+    df_sorted = df.sort_values(['Store Number', 'Year Week'], ascending=[True, False])
+    summary_df = df_sorted.groupby('Store Number').first().reset_index()
+    
+    summary_df = summary_df[summary_cols]
+
 
     # Bar chart for trends
     def create_trend_figure(trend_counts):
