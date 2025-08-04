@@ -10,7 +10,9 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive"
 ]
 
-creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
+creds = Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"], scopes=SCOPES
+)
 client = gspread.authorize(creds)
 
 SPREADSHEET_ID = "1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w"
@@ -21,8 +23,7 @@ def load_data():
     try:
         sheet = client.open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET_NAME)
         data = sheet.get_all_records()
-        df = pd.DataFrame(data)
-        return df
+        return pd.DataFrame(data)
     except Exception as e:
         st.error(f"Failed to load data from Google Sheet: {e}")
         return pd.DataFrame()
@@ -46,11 +47,22 @@ if 'Year Week' not in df.columns:
 
 df['Year Week'] = pd.to_datetime(df['Year Week'], errors='coerce')
 
-# Use ISO week format (Monday start, standard business)
-df['Week Label'] = df['Year Week'].dt.strftime('%G Week %V')
-df['Year'] = df['Year Week'].dt.isocalendar().year
+# Use Sunday-starting week (U.S. style)
+def get_us_week_label(date):
+    if pd.isna(date):
+        return None
+    year = date.year
+    first_day = datetime.datetime(year, 1, 1)
+    # Shift first day to Sunday-start week
+    delta_days = (date - first_day).days
+    start_day_offset = (first_day.weekday() + 1) % 7  # 0 if Jan 1 is Sunday
+    week_num = ((delta_days + start_day_offset) // 7) + 1
+    return f"{year} Week {week_num:02d}"
 
-# Optional: Format store names and clean up strings
+df['Week Label'] = df['Year Week'].apply(get_us_week_label)
+df['Year'] = df['Year Week'].dt.year
+
+# Optional: Clean & Format
 if 'Store Name' in df.columns:
     df['Store Name'] = df['Store Name'].str.title()
 
@@ -60,7 +72,7 @@ if 'Store Number' in df.columns:
 if 'Baseline' in df.columns:
     df['Baseline'] = df['Baseline'].astype(str).str.strip()
 
-# Baseline mapping (for reference)
+# Baseline mapping (optional reference)
 baseline_df = df[df.get('Baseline') == "/True"].copy()
 baseline_map = baseline_df.set_index('Store Number')['Week Label'].to_dict()
 
@@ -78,13 +90,22 @@ for year in years:
             with st.expander(f"📆 {week} — {count} submission(s)"):
                 st.dataframe(year_data[year_data['Week Label'] == week].reset_index(drop=True))
 
-# --- Current Week's Data ---
-current_date = datetime.datetime.now()
-current_iso = current_date.isocalendar()
-current_week_label = f"{current_iso.year} Week {current_iso.week:02d}"
-current_year = current_iso.year
+# --- Current Week's Data (Sunday-based) ---
+today = datetime.datetime.now()
+year = today.year
+first_day = datetime.datetime(year, 1, 1)
+delta_days = (today - first_day).days
+start_day_offset = (first_day.weekday() + 1) % 7
+week_number = ((delta_days + start_day_offset) // 7) + 1
+current_week_label = f"{year} Week {week_number:02d}"
 
 current_week_df = df[df['Week Label'] == current_week_label]
+submission_count = len(current_week_df)
 
-st.markdown(f"### 📋 {len(current_week_df)} Submissions for the week of {current_date.strftime('%B %d')} (week {current_iso.week} of the year), {current_year}")
+# Format title with red count
+title_html = f"""
+### 📋 <span><span style='color:red; font-weight:bold;'>{submission_count}</span> Submissions for {year} Week of {week_number:02d}</span>
+"""
+st.markdown(title_html, unsafe_allow_html=True)
+
 st.dataframe(current_week_df.reset_index(drop=True))
