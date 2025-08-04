@@ -215,25 +215,6 @@ if submitted and password_input == "1234":
                 cpm = row.get('CPM', '')
                 html.append(f"<div style='font-weight:bold; font-size:1.2em;'>{store_number} - {store_name}, {prototype} ({cpm})</div>")
 
-                date_fields = ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening"]
-                html.append("<li><span class='label'>Dates:</span><ul>")
-                for field in date_fields:
-                    val = row.get(field)
-                    if isinstance(val, (datetime.datetime, datetime.date)):
-                        val = val.strftime("%m/%d/%y")
-                    baseline_val = row.get(f"⚪ Baseline {field}")
-                    if pd.notna(baseline_val) and val == baseline_val:
-                        html.append(f"<li><b style='color:red;'> Baseline</b>: {field} - {val}</li>")
-                    else:
-                        html.append(f"<li>{field}: {val}</li>")
-                html.append("</ul></li>")
-
-                notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
-                if notes:
-                    html.append("<li><span class='label'>Notes:</span><ul>")
-                    html += [f"<li style='margin-left: 40px;'>{n}</li>" for n in notes]
-                    html.append("</ul></li>")
-
                 html.append("</ul></div>")
 
         html.append("</body></html>")
