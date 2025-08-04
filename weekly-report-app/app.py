@@ -50,6 +50,9 @@ def load_data():
     df['Week_Label'] = df['Year'].astype(str) + " Week " + df['Week'].astype(str)
     return df
 
+# Load the data here
+df = load_data()
+
 # ------------------- DETERMINE CURRENT WEEK -----------------------
 today = datetime.date.today()
 start_of_week = today - datetime.timedelta(days=today.weekday() + 1)  # Sunday
