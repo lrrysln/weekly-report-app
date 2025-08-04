@@ -36,9 +36,6 @@ if df.empty:
 # Clean column names
 df.columns = df.columns.str.strip()
 
-# Show available columns for reference
-st.write("🧪 Available Columns:", df.columns.tolist())
-
 # --- Use 'Year Week' as timestamp ---
 if 'Year Week' not in df.columns:
     st.error("❌ Column 'Year Week' not found in data. Cannot calculate week label.")
