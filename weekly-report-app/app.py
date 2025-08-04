@@ -123,7 +123,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 columns_to_show = ['Store Number', 'Store Name', 'CPM', 'Prototype', 'Week Label']
-st.dataframe(current_week_df[columns_to_show].reset_index(drop=True), 
+st.dataframe(current_week_df[columns_to_show].reset_index(drop=True)) 
 
 st.subheader("🔐 Generate Weekly Summary Report")
 password = st.text_input("Enter Password", type="password")
