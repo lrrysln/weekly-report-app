@@ -19,7 +19,7 @@ if st.session_state.get("password_entered") != True:
     if st.button("Submit"):
         if password == "1234":
             st.session_state["password_entered"] = True
-            st.experimental_rerun()  # <-- valid here
+            st.rerun()
         else:
             st.error("Incorrect password.")
 
