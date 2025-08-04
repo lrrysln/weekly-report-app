@@ -114,9 +114,6 @@ if submitted and password_input == "1234":
         else:
             return "held"
 
-    df['Store Opening'] = pd.to_datetime(df['Store Opening'], errors='coerce')
-    df['Trend'] = df.apply(compute_trend, axis=1)
-
     # Calculate delta
     def compute_delta(row):
         baseline_open = baseline_map.get(row['Store Number'])
