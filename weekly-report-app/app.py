@@ -32,13 +32,14 @@ def load_data():
         st.error(f"Failed to load data from Google Sheet: {e}")
         return pd.DataFrame()
 
-df = load_data()
+# ... (imports, auth, creds, load_data() etc unchanged)
 
+df = load_data()
 if df.empty:
     st.warning("⚠️ No data loaded from Google Sheet yet.")
     st.stop()
 
-# --- Preprocess Data (add Year Week etc from second script) ---
+# Preprocess: add Year Week, Week Label, Year, Date columns (from your second script)
 df.columns = df.columns.str.strip()
 df['Year Week'] = pd.to_datetime(df['Year Week'], errors='coerce')
 df['Week Label'] = df['Year Week'].dt.strftime('%G Week %V')
@@ -52,7 +53,7 @@ if 'Store Number' in df.columns:
 if 'Baseline' in df.columns:
     df['Baseline'] = df['Baseline'].astype(str).str.strip()
 
-# --- Current Week Display (replace old Submitted Reports Overview) ---
+# Replace Submitted Reports Overview with current week view
 today = datetime.date.today()
 start_of_week = today - datetime.timedelta(days=today.weekday() + 1 if today.weekday() != 6 else 0)
 start_of_week = start_of_week if today.weekday() != 6 else today
@@ -60,21 +61,20 @@ end_of_week = start_of_week + datetime.timedelta(days=6)
 
 current_week_number = start_of_week.isocalendar()[1]
 current_year = start_of_week.year
-week_label = f"{current_year} Week {current_week_number:02d}"
 
 current_week_df = df[(df['Date'] >= start_of_week) & (df['Date'] <= end_of_week)]
 
 st.markdown(
-    f"""### 📋 <span style='color:red'>{len(current_week_df)}</span> Submissions for the week of {start_of_week.strftime('%B %d')}–{end_of_week.strftime('%B %d')} (week {current_week_number} of the year), {current_year}""",
-    unsafe_allow_html=True
+    f"### 📋 <span style='color:red'>{len(current_week_df)}</span> Submissions for the week of "
+    f"{start_of_week.strftime('%B %d')}–{end_of_week.strftime('%B %d')} "
+    f"(week {current_week_number} of the year), {current_year}",
+    unsafe_allow_html=True,
 )
 columns_to_show = ['Store Number', 'Store Name', 'CPM', 'Prototype', 'Week Label']
 st.dataframe(current_week_df[columns_to_show].reset_index(drop=True), use_container_width=True)
 
-# --- Password Protected Report & Folder Dropdown ---
-
+# Password input and year-folder dropdown
 st.subheader("🔐 Generate Weekly Summary Report")
-
 password = st.text_input("Enter Password", type="password")
 
 if password == "1234":
@@ -92,10 +92,8 @@ if password == "1234":
                 with st.expander(f"📆 {week} — {count} submission(s)"):
                     st.dataframe(year_data[year_data['Week Label'] == week].reset_index(drop=True))
 
-    # --- Existing Detailed Weekly Summary Report Logic ---
-    # (Use your existing code for baseline, trend calculation, summary_df, etc.)
+    # --- then your existing trend calculations and summary_df code ---
 
-    # After processing, button to generate report:
     if st.button("Generate Detailed Weekly Summary Report"):
         df_result, html = generate_weekly_summary(df, summary_df, password)
         if html is not None:
@@ -106,14 +104,14 @@ if password == "1234":
                 data=html.encode('utf-8'),
                 file_name=f"Weekly_Summary_{datetime.datetime.now().strftime('%Y%m%d')}.html",
                 mime="text/html",
-                use_container_width=True
+                use_container_width=True,
             )
         else:
             st.error(html)
 
+elif password:
+    st.error("❌ Incorrect password.")
 else:
-    if password:
-        st.error("❌ Incorrect password.")
-    else:
-        st.info("Please enter the password to view the full report.")
+    st.info("Please enter the password to view the full report.")
+
 
