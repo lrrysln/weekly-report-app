@@ -81,16 +81,35 @@ if password == "1234":
                     st.dataframe(year_data[year_data['Week Label'] == week].reset_index(drop=True))
 
     # --- Current Week's Data (Sunday to Saturday) ---
-    today = datetime.date.today()
-    # Calculate start_of_week as Sunday
-    if today.weekday() == 6:  # Sunday
-        start_of_week = today
-    else:
-        start_of_week = today - datetime.timedelta(days=today.weekday() + 1)
-    end_of_week = start_of_week + datetime.timedelta(days=6)
+today = datetime.date.today()
+start_of_week = today - datetime.timedelta(days=today.weekday() + 1 if today.weekday() != 6 else 0)
+start_of_week = start_of_week if today.weekday() != 6 else today
+end_of_week = start_of_week + datetime.timedelta(days=6)
 
-    current_week_number = start_of_week.isocalendar()[1]
-    current_year = start_of_week.year
+# Format label as "2025 Week 32"
+current_week_number = start_of_week.isocalendar()[1]
+current_year = start_of_week.year
+week_label = f"{current_year} Week {current_week_number:02d}"
+
+# Filter using adjusted week range
+df['Date'] = pd.to_datetime(df['Year Week'], errors='coerce').dt.date
+current_week_df = df[(df['Date'] >= start_of_week) & (df['Date'] <= end_of_week)]
+
+# Display week range + red submission count
+st.markdown(
+    f"""### 📋 <span style='color:red'>{len(current_week_df)}</span> Submissions for the week of {start_of_week.strftime('%B %d')}–{end_of_week.strftime('%B %d')} (week {current_week_number} of the year), {current_year}""",
+    unsafe_allow_html=True
+)
+
+# Show original columns plus Week Label
+if 'Week Label' not in current_week_df.columns:
+    current_week_df['Week Label'] = current_week_df['Year Week'].dt.strftime('%G Week %V')
+
+columns_to_display = df.columns.tolist()
+if 'Week Label' not in columns_to_display:
+    columns_to_display.append('Week Label')
+
+st.dataframe(current_week_df[columns_to_display].reset_index(drop=True), use_container_width=True)
 
     # Ensure Date column exists
     df['Date'] = pd.to_datetime(df['Year Week'], errors='coerce').dt.date
