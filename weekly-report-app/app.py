@@ -85,49 +85,49 @@ if submitted and password_input == "1234":
     for year in years:
         with st.expander(f"📁 {year}"):
             year_data = df[df['Year'] == year]
-            weekly_counts = year_data.groupby('Week Label').size().reset_index(name='Count')           
+            weekly_counts = year_data.groupby('Week Label').size().reset_index(name='Count')
             for _, row in weekly_counts.iterrows():
                 week = row['Week Label']
                 count = row['Count']
                 with st.expander(f"📆 {week} — {count} submission(s)"):
                     st.dataframe(year_data[year_data['Week Label'] == week].reset_index(drop=True))
 
-   # --- Detailed Weekly Summary Report ---
+    # --- Detailed Weekly Summary Report ---
 
-# First, strip spaces on Baseline column to be safe
-df['Baseline'] = df['Baseline'].astype(str).str.strip()
+    # First, strip spaces on Baseline column to be safe
+    df['Baseline'] = df['Baseline'].astype(str).str.strip()
 
-# Filter baseline entries and convert their Store Opening to datetime BEFORE creating the mapping
-baseline_df = df[df['Baseline'] == "/True"].copy()
-baseline_df['Store Opening'] = pd.to_datetime(baseline_df['Store Opening'], errors='coerce')
+    # Filter baseline entries and convert their Store Opening to datetime BEFORE creating the mapping
+    baseline_df = df[df['Baseline'] == "/True"].copy()
+    baseline_df['Store Opening'] = pd.to_datetime(baseline_df['Store Opening'], errors='coerce')
 
-# Create mapping from Store Number to baseline Store Opening date (datetime)
-baseline_map = baseline_df.set_index('Store Number')['Store Opening'].to_dict()
+    # Create mapping from Store Number to baseline Store Opening date (datetime)
+    baseline_map = baseline_df.set_index('Store Number')['Store Opening'].to_dict()
 
-# Convert entire df Store Opening column to datetime
-df['Store Opening'] = pd.to_datetime(df['Store Opening'], errors='coerce')
+    # Convert entire df Store Opening column to datetime
+    df['Store Opening'] = pd.to_datetime(df['Store Opening'], errors='coerce')
 
-# Define trend calculation function with safe checks
-def compute_trend(row):
-    store_number = row['Store Number']
-    current_open = row['Store Opening']
-    if row['Baseline'] == "/True":
-        return "baseline"
-    baseline_open = baseline_map.get(store_number)
-    if pd.isna(current_open) or pd.isna(baseline_open):
-        return "no baseline dates"
-    if current_open > baseline_open:
-        return "pushed"
-    elif current_open < baseline_open:
-        return "pulled in"
-    else:
-        return "held"
+    # Define trend calculation function with safe checks
+    def compute_trend(row):
+        store_number = row['Store Number']
+        current_open = row['Store Opening']
+        if row['Baseline'] == "/True":
+            return "baseline"
+        baseline_open = baseline_map.get(store_number)
+        if pd.isna(current_open) or pd.isna(baseline_open):
+            return "no baseline dates"
+        if current_open > baseline_open:
+            return "pushed"
+        elif current_open < baseline_open:
+            return "pulled in"
+        else:
+            return "held"
 
-# Apply trend computation to the dataframe
-df['Trend'] = df.apply(compute_trend, axis=1)
+    # Apply trend computation to the dataframe
+    df['Trend'] = df.apply(compute_trend, axis=1)
 
-# Calculate delta
-def compute_delta(row):
+    # Calculate delta
+    def compute_delta(row):
         baseline_open = baseline_map.get(row['Store Number'])
         if pd.isna(row['Store Opening']) or pd.isna(baseline_open):
             return 0
@@ -144,12 +144,14 @@ def compute_delta(row):
     df['Flag'] = df['Store Opening Delta'].apply(flag_delta)
 
     # Filter notes for keywords
-    keywords = ["behind schedule", "lagging", "delay", "critical path", "cpm impact", "work on hold", "stop work order",
-                "reschedule", "off track", "schedule drifting", "missed milestone", "budget overrun", "cost impact",
-                "change order pending", "claim submitted", "dispute", "litigation risk", "schedule variance",
-                "material escalation", "labor shortage", "equipment shortage", "low productivity", "rework required",
-                "defects found", "qc failure", "weather delays", "permit delays", "regulatory hurdles",
-                "site access issues", "awaiting sign-off", "conflict", "identified risk", "mitigation", "forecast revised"]
+    keywords = [
+        "behind schedule", "lagging", "delay", "critical path", "cpm impact", "work on hold", "stop work order",
+        "reschedule", "off track", "schedule drifting", "missed milestone", "budget overrun", "cost impact",
+        "change order pending", "claim submitted", "dispute", "litigation risk", "schedule variance",
+        "material escalation", "labor shortage", "equipment shortage", "low productivity", "rework required",
+        "defects found", "qc failure", "weather delays", "permit delays", "regulatory hurdles",
+        "site access issues", "awaiting sign-off", "conflict", "identified risk", "mitigation", "forecast revised"
+    ]
 
     def check_notes(text):
         text_lower = str(text).lower()
@@ -267,7 +269,3 @@ else:
         st.error("❌ Incorrect password.")
     else:
         st.info("Please enter the password and click Submit to view the full report.")
-
-
-
-
