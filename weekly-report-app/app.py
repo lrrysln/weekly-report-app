@@ -5,6 +5,22 @@ import os
 from io import BytesIO
 from dateutil.parser import parse
 from streamlit.components.v1 import html
+import gspread
+from google.oauth2.service_account import Credentials
+
+# --- Auth & Google Sheets Setup ---
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
+
+creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
+client = gspread.authorize(creds)
+
+SPREADSHEET_ID = "1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w"
+WORKSHEET_NAME = "Sheet1"
+
+@st.cache_data(ttl=600)
 
 # ------------------- CONFIG -----------------------
 st.set_page_config(page_title="Construction Weekly Tracker", layout="wide")
