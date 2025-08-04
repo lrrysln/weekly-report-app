@@ -49,25 +49,28 @@ def load_data():
     df.columns = df.columns.str.strip()
 
     # Ensure 'Year Week' exists
-    if 'Year Week' in df.columns:
-        # Check rows that contain '-'
-        mask = df['Year Week'].astype(str).str.contains('-', na=False)
+   if 'Year Week' in df.columns:
+    # Clean strings
+    df['Year Week'] = df['Year Week'].astype(str).str.strip()
 
-        # Create empty Year and Week columns
-        df['Year'] = pd.NA
-        df['Week'] = pd.NA
+    # Keep only rows with a dash and 2 parts after split
+    valid_mask = df['Year Week'].str.contains('-', na=False)
+    
+    # Try splitting only valid rows
+    split_vals = df.loc[valid_mask, 'Year Week'].str.split('-', expand=True)
+    
+    # Check shape before assigning
+    if split_vals.shape[1] == 2:
+        df.loc[valid_mask, 'Year'] = split_vals[0].astype(int)
+        df.loc[valid_mask, 'Week'] = split_vals[1].astype(int)
+    else:
+        st.warning("Warning: 'Year Week' splitting did not produce two columns.")
 
-        # Only split where mask is True (values contain '-')
-        split_vals = df.loc[mask, 'Year Week'].str.split('-', expand=True)
+    # Fill other Year/Week values as NA or 0 if you want
+    df['Year'] = df['Year'].fillna(0).astype(int)
+    df['Week'] = df['Week'].fillna(0).astype(int)
 
-        if split_vals.shape[1] == 2:
-            df.loc[mask, 'Year'] = split_vals[0].astype(int)
-            df.loc[mask, 'Week'] = split_vals[1].astype(int)
-        else:
-            st.warning("Warning: 'Year Week' splitting did not produce two columns.")
-
-        # If you want, drop the original column
-        df.drop(columns=['Year Week'], inplace=True)
+    df.drop(columns=['Year Week'], inplace=True)
 
     # Parse dates from 'Start'
     df['Date'] = pd.to_datetime(df['Start'], errors='coerce')
@@ -180,3 +183,12 @@ for year in years:
 
 # Optional footer
 st.markdown("<br><hr><p style='text-align:center;'>Construction Weekly Tracker • © 2025</p>", unsafe_allow_html=True)
+
+
+
+
+st.write("Today:", today)
+st.write("Start of week:", start_of_week)
+st.write("End of week:", end_of_week)
+st.write("Dates in df:", df['Date'].dropna().head(10).tolist())
+st.write("Rows in current week df:", len(current_week_df))
