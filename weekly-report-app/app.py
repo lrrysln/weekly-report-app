@@ -28,7 +28,7 @@ if st.session_state.get("password_entered") != True:
 # ------------------- LOAD AND CACHE DATA -----------------------
 @st.cache_data(ttl=3600)
 def load_data():
-    df = pd.read_csv("your_google_sheet_export.csv")  # Replace with your source
+    sheet = client.open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET_NAME)
     df['Date'] = pd.to_datetime(df['Start'], errors='coerce')
     df['Week'] = df['Date'].dt.isocalendar().week
     df['Year'] = df['Date'].dt.isocalendar().year
