@@ -51,7 +51,7 @@ if 'Store Number' in df.columns:
 if 'Baseline' in df.columns:
     df['Baseline'] = df['Baseline'].astype(str).str.strip()
 
-# --- Current Week Display (Submitted Reports Overview replacement) ---
+# --- Current Week Display ---
 today = datetime.date.today()
 start_of_week = today - datetime.timedelta(days=today.weekday() + 1 if today.weekday() != 6 else 0)
 start_of_week = start_of_week if today.weekday() != 6 else today
@@ -66,18 +66,16 @@ st.markdown(
     f"""### 📋 <span style='color:red'>{len(current_week_df)}</span> Submissions for the week of {start_of_week.strftime('%B %d')}–{end_of_week.strftime('%B %d')} (week {current_week_number} of the year), {current_year}""",
     unsafe_allow_html=True
 )
+
 columns_to_show = ['Store Number', 'Store Name', 'CPM', 'Prototype', 'Week Label']
 st.dataframe(current_week_df[columns_to_show].reset_index(drop=True), use_container_width=True)
 
 # --- Password Protected Section ---
 st.subheader("🔐 Generate Weekly Summary Report")
-
 password = st.text_input("Enter Password", type="password")
 
 if password == "1234":
-
     st.markdown("## 🗓️ Weekly Submission Volume by Year")
-
     years = sorted(df['Year'].dropna().unique(), reverse=True)
     for year in years:
         with st.expander(f"📁 {year}"):
@@ -89,23 +87,15 @@ if password == "1234":
                 with st.expander(f"📆 {week} — {count} submission(s)"):
                     st.dataframe(year_data[year_data['Week Label'] == week].reset_index(drop=True))
 
-    # --- Detailed Weekly Summary Report Preparation ---
-
-    # Ensure Baseline column is cleaned
+    # --- Data for Summary ---
     df['Baseline'] = df['Baseline'].astype(str).str.strip()
-
-    # Filter baseline entries and parse dates
     baseline_df = df[df['Baseline'] == "/True"].copy()
     baseline_df['Store Opening'] = pd.to_datetime(baseline_df['Store Opening'], errors='coerce')
-
-    # Create mapping from Store Number to baseline Store Opening
     baseline_map = baseline_df.set_index('Store Number')['Store Opening'].to_dict()
 
-    # Convert Store Opening column to datetime for full df
     df['Store Opening'] = pd.to_datetime(df['Store Opening'], errors='coerce').dt.normalize()
     baseline_df['Store Opening'] = pd.to_datetime(baseline_df['Store Opening'], errors='coerce').dt.normalize()
 
-    # Calculate trends
     def compute_trend(row):
         store_number = row['Store Number']
         current_open = row['Store Opening']
@@ -123,7 +113,6 @@ if password == "1234":
 
     df['Trend'] = df.apply(compute_trend, axis=1)
 
-    # Calculate delta days
     def compute_delta(row):
         baseline_open = baseline_map.get(row['Store Number'])
         if pd.isna(row['Store Opening']) or pd.isna(baseline_open):
@@ -132,7 +121,6 @@ if password == "1234":
 
     df['Store Opening Delta'] = df.apply(compute_delta, axis=1)
 
-    # Flag significant changes with a red asterisk
     def flag_delta(delta):
         if isinstance(delta, int) and abs(delta) > 5:
             return '<span style="color:red;font-weight:bold;">*</span>'
@@ -140,7 +128,6 @@ if password == "1234":
 
     df['Flag'] = df['Store Opening Delta'].apply(flag_delta)
 
-    # Notes keyword filtering
     keywords = [
         "behind schedule", "lagging", "delay", "critical path", "cpm impact", "work on hold", "stop work order",
         "reschedule", "off track", "schedule drifting", "missed milestone", "budget overrun", "cost impact",
@@ -158,15 +145,10 @@ if password == "1234":
     df['Notes Filtered'] = df['Notes'].apply(lambda x: x if check_notes(x) else "see report below")
 
     summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes Filtered']
-   
-    # Get latest entry per Store Number by Year Week (or Date)
     df_sorted = df.sort_values(['Store Number', 'Year Week'], ascending=[True, False])
     summary_df = df_sorted.groupby('Store Number').first().reset_index()
-    
     summary_df = summary_df[summary_cols]
 
-
-    # Bar chart for trends
     def create_trend_figure(trend_counts):
         hex_colors = {
             "held": "#FDC01A",
@@ -192,70 +174,70 @@ if password == "1234":
         return base64.b64encode(buf.read()).decode()
 
     def generate_weekly_summary(df, summary_df, password):
-    if password != "1234":
-        return None, "❌ Incorrect password."
+        if password != "1234":
+            return None, "❌ Incorrect password."
 
-    trend_order = ["pulled in", "pushed", "held", "baseline", "no baseline dates"]
-    trend_counts = summary_df['Trend'].value_counts().reindex(trend_order, fill_value=0)
-    fig = create_trend_figure(trend_counts)
-    img_base64 = fig_to_base64(fig)
+        trend_order = ["pulled in", "pushed", "held", "baseline", "no baseline dates"]
+        trend_counts = summary_df['Trend'].value_counts().reindex(trend_order, fill_value=0)
+        fig = create_trend_figure(trend_counts)
+        img_base64 = fig_to_base64(fig)
 
-    today = datetime.date.today()
-    week_number = today.isocalendar()[1]
-    year = today.year
+        today = datetime.date.today()
+        week_number = today.isocalendar()[1]
+        year = today.year
 
-    html = [
-        "<html><head><style>",
-        "body{font-family:Arial;padding:20px}",
-        "h1{text-align:center}",
-        "h2{background:#cce5ff;padding:10px;border-radius:4px}",
-        ".entry{border:1px solid #ccc;padding:10px;margin:10px 0;border-radius:4px;background:#f9f9f9}",
-        "ul{margin:0;padding-left:20px}",
-        ".label{font-weight:bold}",
-        "table {border-collapse: collapse; width: 100%; text-align: center;}",
-        "th, td {border: 1px solid #ddd; padding: 8px; text-align: center;}",
-        "th {background-color: #f2f2f2; text-decoration: underline;}",
-        "</style></head><body>",
-        f"<h1>{year} Week: {week_number} Weekly Summary Report</h1>",
-        f'<img src="data:image/png;base64,{img_base64}" style="max-width:800px; display:block; margin:auto;">',
-        "<h2>Trend Summary Table</h2>",
-        trend_counts.rename_axis("Trend").reset_index().rename(columns={"index": "Trend", "Trend": "Count"}).to_html(index=False),
-        "<h2>Executive Summary</h2>",
-        summary_df.to_html(index=False, escape=False),
-        "<hr>"
-    ]
+        html = [
+            "<html><head><style>",
+            "body{font-family:Arial;padding:20px}",
+            "h1{text-align:center}",
+            "h2{background:#cce5ff;padding:10px;border-radius:4px}",
+            ".entry{border:1px solid #ccc;padding:10px;margin:10px 0;border-radius:4px;background:#f9f9f9}",
+            "ul{margin:0;padding-left:20px}",
+            ".label{font-weight:bold}",
+            "table {border-collapse: collapse; width: 100%; text-align: center;}",
+            "th, td {border: 1px solid #ddd; padding: 8px; text-align: center;}",
+            "th {background-color: #f2f2f2; text-decoration: underline;}",
+            "</style></head><body>",
+            f"<h1>{year} Week: {week_number} Weekly Summary Report</h1>",
+            f'<img src="data:image/png;base64,{img_base64}" style="max-width:800px; display:block; margin:auto;">',
+            "<h2>Trend Summary Table</h2>",
+            trend_counts.rename_axis("Trend").reset_index().rename(columns={"index": "Trend", "Trend": "Count"}).to_html(index=False),
+            "<h2>Executive Summary</h2>",
+            summary_df.to_html(index=False, escape=False),
+            "<hr>"
+        ]
 
-    group_col = "Subject" if "Subject" in df.columns else "Store Name"
-    for group_name, group_df in df.groupby(group_col):
-        html.append(f"<h2>{group_name}</h2>")
-        for _, row in group_df.iterrows():
-            store_number = row.get('Store Number', '')
-            store_name = row.get('Store Name', '')
-            prototype = row.get('Prototype', '')
-            cpm = row.get('CPM', '')
-            html.append(f"<div style='font-weight:bold; font-size:1.2em;'>{store_number} - {store_name}, {prototype} ({cpm})</div>")
+        group_col = "Subject" if "Subject" in df.columns else "Store Name"
+        for group_name, group_df in df.groupby(group_col):
+            html.append(f"<h2>{group_name}</h2>")
+            for _, row in group_df.iterrows():
+                store_number = row.get('Store Number', '')
+                store_name = row.get('Store Name', '')
+                prototype = row.get('Prototype', '')
+                cpm = row.get('CPM', '')
+                html.append(f"<div style='font-weight:bold; font-size:1.2em;'>{store_number} - {store_name}, {prototype} ({cpm})</div>")
 
-            date_fields = ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening"]
-            html.append("<li><span class='label'>Dates:</span><ul>")
-            for field in date_fields:
-                val = row.get(field)
-                if isinstance(val, (datetime.datetime, datetime.date)):
-                    val = val.strftime("%m/%d/%y")
-                else:
-                    val = str(val) if val else "N/A"
-                html.append(f"<li style='margin-left: 40px;'><span style='text-decoration: underline;'>{field}</span>: {val}</li>")
-            html.append("</ul></li>")
-
-            notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
-            if notes:
-                html.append("<li><span class='label'>Notes:</span><ul>")
-                html += [f"<li style='margin-left: 40px;'>{n}</li>" for n in notes]
+                date_fields = ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening"]
+                html.append("<li><span class='label'>Dates:</span><ul>")
+                for field in date_fields:
+                    val = row.get(field)
+                    if isinstance(val, (datetime.datetime, datetime.date)):
+                        val = val.strftime("%m/%d/%y")
+                    else:
+                        val = str(val) if val else "N/A"
+                    html.append(f"<li style='margin-left: 40px;'><span style='text-decoration: underline;'>{field}</span>: {val}</li>")
                 html.append("</ul></li>")
 
-            html.append("</ul></div>")
+                notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
+                if notes:
+                    html.append("<li><span class='label'>Notes:</span><ul>")
+                    html += [f"<li style='margin-left: 40px;'>{n}</li>" for n in notes]
+                    html.append("</ul></li>")
 
-    html.append("</body></html>")
-    return df, "".join(html)
+                html.append("</ul></div>")
+
+        html.append("</body></html>")
+        return df, "".join(html)
 
     if st.button("Generate Detailed Weekly Summary Report"):
         df_result, html = generate_weekly_summary(df, summary_df, password)
