@@ -77,6 +77,30 @@ with st.form("password_form"):
     password_input = st.text_input("Enter Password", type="password")
     submitted = st.form_submit_button("Submit")
 
+if submitted:
+    if password_input == "1234":
+        st.session_state['authenticated'] = True
+        st.success("✅ Password accepted.")
+    else:
+        st.session_state['authenticated'] = False
+        st.error("❌ Incorrect password.")
+
+if st.session_state.get('authenticated', False):
+    if st.button("Generate Detailed Weekly Summary Report"):
+        # Put your report generation code here
+        html_report = generate_weekly_summary(df, summary_df)
+        st.markdown("### Weekly Summary Report")
+        st.components.v1.html(html_report, height=1000, scrolling=True)
+        st.download_button(
+            label="📥 Download Summary as HTML",
+            data=html_report.encode('utf-8'),
+            file_name=f"Weekly_Summary_{datetime.datetime.now().strftime('%Y%m%d')}.html",
+            mime="text/html",
+            use_container_width=True
+        )
+else:
+    st.info("Please enter the password and click Submit to view the full report.")
+
 if submitted and password_input == "1234":
 
     st.markdown("## 🗓️ Weekly Submission Volume by Year")
