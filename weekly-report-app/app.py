@@ -83,5 +83,11 @@ current_year = current_iso.year
 
 current_week_df = df[df['Week Label'] == current_week_label]
 
-st.markdown(f"### 📋 {len(current_week_df)} Submissions for the week of {current_date.strftime('%B %d')} (week {current_iso.week} of the year), {current_year}")
+submission_count = len(current_week_df)
+year = current_iso.year
+week_num = current_iso.week
+
+title_html = f"""### 📋 <span> <span style='color:red; font-weight:bold;'>{submission_count}</span> Submissions for {year} Week of {week_num:02d} </span>"""
+st.markdown(title_html, unsafe_allow_html=True)
+
 st.dataframe(current_week_df.reset_index(drop=True))
