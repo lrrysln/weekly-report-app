@@ -1,82 +1,126 @@
 import streamlit as st
 import pandas as pd
 import datetime
-import calendar
-import io
-import base64
-from collections import defaultdict
+import os
+from io import BytesIO
+from dateutil.parser import parse
+from streamlit.components.v1 import html
 
-# --- CONFIG ---
-PASSWORD = "your_password_here"  # Replace this with your actual password
-SHEET_PATH = "data/weekly_data.csv"  # Replace with your actual path or data fetching method
+# ------------------- CONFIG -----------------------
+st.set_page_config(page_title="Construction Weekly Tracker", layout="wide")
 
-# --- CACHE DATA ---
-@st.cache_data(show_spinner=False)
+# ------------------- PASSWORD PROTECTION -----------------------
+PASSWORD = "your_password_here"  # Replace with your password
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.subheader("🔐 Enter Password to Access Weekly Report")
+    input_password = st.text_input("Password", type="password")
+    if st.button("Submit"):
+        if input_password == PASSWORD:
+            st.session_state.authenticated = True
+            st.experimental_rerun()
+        else:
+            st.error("Incorrect password.")
+    st.stop()
+
+# ------------------- LOAD AND CACHE DATA -----------------------
+@st.cache_data(ttl=3600)
 def load_data():
-    df = pd.read_csv(SHEET_PATH)
-    df['Start'] = pd.to_datetime(df['Start'], errors='coerce')
-    df['TCO'] = pd.to_datetime(df['TCO'], errors='coerce')
-    df['Store Opening'] = pd.to_datetime(df['Store Opening'], errors='coerce')
-    df['Turnover'] = pd.to_datetime(df['Turnover'], errors='coerce')
-    df['Week Start'] = pd.to_datetime(df['Year Week'].str.extract(r'(\d{4}) week (\d{1,2})').apply(lambda x: datetime.date.fromisocalendar(int(x[0]), int(x[1]), 1), axis=1))
+    df = pd.read_csv("your_google_sheet_export.csv")  # Replace with your source
+    df['Date'] = pd.to_datetime(df['Start'], errors='coerce')
+    df['Week'] = df['Date'].dt.isocalendar().week
+    df['Year'] = df['Date'].dt.isocalendar().year
+    df['Week_Label'] = df['Year'].astype(str) + " Week " + df['Week'].astype(str)
     return df
 
-# --- FUNCTIONS ---
-def generate_weekly_report(df, week_label):
-    week_df = df[df['Year Week'] == week_label].copy()
-    if week_df.empty:
-        return "<p>No data for this week.</p>"
-
-    summary_html = f"<h3 style='color:darkblue;'>Weekly Summary Report - {week_label}</h3><ul>"
-    for _, row in week_df.iterrows():
-        summary_html += f"<li><strong>{row['Store Name']} ({row['Store Number']})</strong> - {row['Subject']} | Prototype: {row['Prototype']} | CPM: {row['CPM']}<br>"
-        summary_html += f"Start: {row['Start'].date() if pd.notna(row['Start']) else 'N/A'}, TCO: {row['TCO'].date() if pd.notna(row['TCO']) else 'N/A'}, Turnover: {row['Turnover'].date() if pd.notna(row['Turnover']) else 'N/A'}, Store Opening: {row['Store Opening'].date() if pd.notna(row['Store Opening']) else 'N/A'}<br>"
-        summary_html += f"Notes: {row[' Notes']}</li><br>"
-    summary_html += "</ul>"
-    return summary_html
-
-def get_current_week_label():
-    today = datetime.date.today()
-    iso_year, iso_week, _ = today.isocalendar()
-    return f"{iso_year} week {iso_week}"
-
-def to_html_download(report_html, filename):
-    b64 = base64.b64encode(report_html.encode()).decode()
-    return f'<a href="data:text/html;base64,{b64}" download="{filename}">Download Report</a>'
-
-# --- APP ---
-st.title("📊 Construction Weekly Overview")
 df = load_data()
-st.dataframe(df[["Year Week", "Store Name", "Store Number", "Subject", "Prototype"]], use_container_width=True)
 
-# Password Access
-st.markdown("---")
-st.subheader("🔐 Enter password to view reports")
-password = st.text_input("Password", type="password")
+# ------------------- DETERMINE CURRENT WEEK -----------------------
+today = datetime.date.today()
+start_of_week = today - datetime.timedelta(days=today.weekday() + 1)  # Sunday
+end_of_week = start_of_week + datetime.timedelta(days=6)
 
-if password == PASSWORD:
-    st.success("Access granted")
+current_week_df = df[(df['Date'] >= pd.to_datetime(start_of_week)) & (df['Date'] <= pd.to_datetime(end_of_week))]
 
-    current_week_label = get_current_week_label()
-    st.subheader(f"📝 Current Week Summary: {current_week_label}")
+# ------------------- GENERATE WEEKLY SUMMARY REPORT -----------------------
+def generate_weekly_report(data):
+    summary = f"""
+    <h2 style='color:#004aad'>Weekly Construction Summary – Week {start_of_week.strftime('%U')} ({start_of_week} to {end_of_week})</h2>
+    <p><strong>Total Entries:</strong> {len(data)}</p>
+    <table border='1' style='border-collapse: collapse; width:100%'>
+        <tr>
+            <th>Store Name</th>
+            <th>Store #</th>
+            <th>Prototype</th>
+            <th>CPM</th>
+            <th>Start</th>
+            <th>TCO</th>
+            <th>Ops Walk</th>
+            <th>Turnover</th>
+            <th>Open to Train</th>
+            <th>Store Opening</th>
+            <th>Notes</th>
+        </tr>
+    """
+    for _, row in data.iterrows():
+        summary += f"""
+            <tr>
+                <td>{row.get('Store Name','')}</td>
+                <td>{row.get('Store Number','')}</td>
+                <td>{row.get('Prototype','')}</td>
+                <td>{row.get('CPM','')}</td>
+                <td>{row.get('Start','')}</td>
+                <td>{row.get('TCO','')}</td>
+                <td>{row.get('Ops Walk','')}</td>
+                <td>{row.get('Turnover','')}</td>
+                <td>{row.get('Open to Train','')}</td>
+                <td>{row.get('Store Opening','')}</td>
+                <td>{row.get('Notes','').replace('\n', '<br>')}</td>
+            </tr>
+        """
+    summary += "</table>"
+    return summary
 
-    html_summary = generate_weekly_report(df, current_week_label)
-    st.components.v1.html(html_summary, height=400, scrolling=True)
+# ------------------- MAIN UI -----------------------
+st.title("🏗️ Construction Weekly Tracker")
 
-    st.markdown(to_html_download(html_summary, f"Weekly_Report_{current_week_label}.html"), unsafe_allow_html=True)
-
-    st.markdown("---")
-    st.subheader("📂 Past Weekly Reports")
-
-    years = sorted(df['Year Week'].str.extract(r'(\d{4})')[0].astype(int).unique(), reverse=True)
-    for year in years:
-        with st.expander(f"Year {year}"):
-            year_df = df[df['Year Week'].str.startswith(str(year))]
-            weeks = sorted(year_df['Year Week'].unique(), reverse=True)
-            for week in weeks:
-                with st.expander(week):
-                    display_df = year_df[year_df['Year Week'] == week]
-                    st.dataframe(display_df.drop(columns=['__PowerAppsId__', 'Week Start']), use_container_width=True)
+# 👉 CURRENT WEEK REPORT
+st.subheader(f"📋 Current Week Report: {start_of_week.strftime('%B %d')} - {end_of_week.strftime('%B %d, %Y')}")
+if current_week_df.empty:
+    st.warning("No submissions yet for this week.")
 else:
-    if password:
-        st.error("Incorrect password. Please try again.")
+    report_html = generate_weekly_report(current_week_df)
+    html(report_html, height=600, scrolling=True)
+
+    # Download as HTML
+    download_button = st.download_button(
+        label="📥 Download Weekly Summary (HTML)",
+        data=report_html,
+        file_name=f"Weekly_Summary_{start_of_week}_to_{end_of_week}.html",
+        mime="text/html"
+    )
+
+# 👉 YEAR/WEEK HISTORICAL REVIEW
+st.markdown("---")
+st.subheader("📚 Past Weekly Submissions by Year")
+
+years = sorted(df['Year'].dropna().unique(), reverse=True)
+
+for year in years:
+    with st.expander(f"📅 {year}"):
+        year_df = df[df['Year'] == year]
+        weeks = sorted(year_df['Week'].dropna().unique(), reverse=True)
+        for week in weeks:
+            week_df = year_df[year_df['Week'] == week]
+            label = f"Week {int(week)}"
+            with st.expander(label):
+                display_df = week_df[[
+                    "Store Name", "Store Number", "Prototype", "CPM", "Start", "TCO",
+                    "Ops Walk", "Turnover", "Open to Train", "Store Opening", "Notes"
+                ]]
+                st.dataframe(display_df, use_container_width=True)
+
+# Optional footer
+st.markdown("<br><hr><p style='text-align:center;'>Construction Weekly Tracker • © 2025</p>", unsafe_allow_html=True)
