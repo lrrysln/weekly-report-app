@@ -33,40 +33,47 @@ if df.empty:
     st.warning("⚠️ No data loaded from Google Sheet yet.")
     st.stop()
 
-# Clean column names
+# --- Preprocess Data ---
 df.columns = df.columns.str.strip()
-
-# --- Use 'Year Week' as timestamp ---
-if 'Year Week' not in df.columns:
-    st.error("❌ Column 'Year Week' not found in data. Cannot calculate week label.")
-    st.stop()
-
 df['Year Week'] = pd.to_datetime(df['Year Week'], errors='coerce')
-
-# Use ISO week format (Monday start, standard business)
 df['Week Label'] = df['Year Week'].dt.strftime('%G Week %V')
 df['Year'] = df['Year Week'].dt.isocalendar().year
+df['Date'] = df['Year Week'].dt.date
 
-# Optional: Format store names and clean up strings
 if 'Store Name' in df.columns:
     df['Store Name'] = df['Store Name'].str.title()
-
 if 'Store Number' in df.columns:
     df['Store Number'] = df['Store Number'].astype(str).str.strip()
-
 if 'Baseline' in df.columns:
     df['Baseline'] = df['Baseline'].astype(str).str.strip()
 
-# Baseline mapping (for reference)
-baseline_df = df[df.get('Baseline') == "/True"].copy()
-baseline_map = baseline_df.set_index('Store Number')['Week Label'].to_dict()
+# --- Current Week Display (shown to all users) ---
+today = datetime.date.today()
+start_of_week = today - datetime.timedelta(days=today.weekday() + 1 if today.weekday() != 6 else 0)
+start_of_week = start_of_week if today.weekday() != 6 else today
+end_of_week = start_of_week + datetime.timedelta(days=6)
 
-# --- Input Password ---
+current_week_number = start_of_week.isocalendar()[1]
+current_year = start_of_week.year
+week_label = f"{current_year} Week {current_week_number:02d}"
+
+current_week_df = df[(df['Date'] >= start_of_week) & (df['Date'] <= end_of_week)]
+
+st.markdown(
+    f"""### 📋 <span style='color:red'>{len(current_week_df)}</span> Submissions for the week of {start_of_week.strftime('%B %d')}–{end_of_week.strftime('%B %d')} (week {current_week_number} of the year), {current_year}""",
+    unsafe_allow_html=True
+)
+columns_to_show = ['Store Number', 'Store Name', 'CPM', 'Prototype', 'Week Label']
+st.dataframe(current_week_df[columns_to_show].reset_index(drop=True), use_container_width=True)
+
+# --- Password-Protected Report ---
 st.subheader("🔐 Generate Weekly Summary Report")
-password = st.text_input("Enter Password", type="password")
 
-# --- Weekly Overview Section: NOW AFTER password check ---
-if password == "1234":
+with st.form("password_form"):
+    password_input = st.text_input("Enter Password", type="password")
+    submitted = st.form_submit_button("Submit")
+
+if submitted and password_input == "1234":
     st.markdown("## 🗓️ Weekly Submission Volume by Year")
 
     years = sorted(df['Year'].dropna().unique(), reverse=True)
@@ -80,51 +87,17 @@ if password == "1234":
                 with st.expander(f"📆 {week} — {count} submission(s)"):
                     st.dataframe(year_data[year_data['Week Label'] == week].reset_index(drop=True))
 
-    # --- Current Week's Data (Sunday to Saturday) ---
-    # --- Current Week's Data (Sunday to Saturday) ---
-    today = datetime.date.today()
-    start_of_week = today - datetime.timedelta(days=today.weekday() + 1 if today.weekday() != 6 else 0)
-    start_of_week = start_of_week if today.weekday() != 6 else today
-    end_of_week = start_of_week + datetime.timedelta(days=6)
-
-    # Format label as "2025 Week 32"
-    current_week_number = start_of_week.isocalendar()[1]
-    current_year = start_of_week.year
-    week_label = f"{current_year} Week {current_week_number:02d}"
-
-    # Ensure Date column exists
-    df['Date'] = pd.to_datetime(df['Year Week'], errors='coerce').dt.date
-    current_week_df = df[(df['Date'] >= start_of_week) & (df['Date'] <= end_of_week)]
-
-    # Display header with red count
-    st.markdown(
-        f"""### 📋 <span style='color:red'>{len(current_week_df)}</span> Submissions for the week of {start_of_week.strftime('%B %d')}–{end_of_week.strftime('%B %d')} (week {current_week_number} of the year), {current_year}""",
-        unsafe_allow_html=True
-    )
-
-    # Use same columns as main submission table, plus Week Label
-    if 'Week Label' not in current_week_df.columns:
-        current_week_df['Week Label'] = current_week_df['Year Week'].dt.strftime('%G Week %V')
-
-    columns_to_show = ['Store Number', 'Store Name', 'CPM', 'Prototype', 'Week Label']
-    st.dataframe(current_week_df[columns_to_show].reset_index(drop=True), use_container_width=True)
-
 else:
-    st.info("Please enter the password to view weekly submission volume and reports.")
+    if submitted:
+        st.error("❌ Incorrect password.")
+    else:
+        st.info("Please enter the password and click Submit to view the full report.")
 
-# --- Format store names for main df ---
-df['Store Name'] = df['Store Name'].str.title()
-
-# Convert date columns to datetime
+# --- Continue with rest of processing ---
 df['Store Opening'] = pd.to_datetime(df['Store Opening'], errors='coerce')
-df['Baseline'] = df['Baseline'].astype(str).str.strip()
-df['Store Number'] = df['Store Number'].astype(str).str.strip()
-
-# Separate baseline & non-baseline entries
 baseline_df = df[df['Baseline'] == "/True"].copy()
 baseline_map = baseline_df.set_index('Store Number')['Store Opening'].to_dict()
 
-# Trend calculation
 def compute_trend(row):
     store_number = row['Store Number']
     current_open = row['Store Opening']
@@ -142,7 +115,6 @@ def compute_trend(row):
 
 df['Trend'] = df.apply(compute_trend, axis=1)
 
-# Calculate delta
 def compute_delta(row):
     baseline_open = baseline_map.get(row['Store Number'])
     if pd.isna(row['Store Opening']) or pd.isna(baseline_open):
@@ -151,7 +123,6 @@ def compute_delta(row):
 
 df['Store Opening Delta'] = df.apply(compute_delta, axis=1)
 
-# Flag logic with red asterisk
 def flag_delta(delta):
     if isinstance(delta, int) and abs(delta) > 5:
         return '<span style="color:red;font-weight:bold;">*</span>'
@@ -159,7 +130,6 @@ def flag_delta(delta):
 
 df['Flag'] = df['Store Opening Delta'].apply(flag_delta)
 
-# Filter notes for keywords
 keywords = ["behind schedule", "lagging", "delay", "critical path", "cpm impact", "work on hold", "stop work order",
             "reschedule", "off track", "schedule drifting", "missed milestone", "budget overrun", "cost impact",
             "change order pending", "claim submitted", "dispute", "litigation risk", "schedule variance",
@@ -176,7 +146,3 @@ df['Notes Filtered'] = df['Notes'].apply(lambda x: x if check_notes(x) else "see
 
 summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes Filtered']
 summary_df = df[summary_cols].drop_duplicates(subset=['Store Number']).reset_index(drop=True)
-
-# --- (Optional) The rest of your report generation and plotting code here ---
-# (If you want me to add that too, just ask!)
-
