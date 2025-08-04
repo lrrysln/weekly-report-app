@@ -44,10 +44,23 @@ def load_data():
     sheet = client.open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET_NAME)
     data = sheet.get_all_records()
     df = pd.DataFrame(data)
+    
+    # Strip whitespace from column names
+    df.columns = df.columns.str.strip()
+    
+    # If "Year Week" is one column, split into Year and Week
+    if 'Year Week' in df.columns:
+        df[['Year', 'Week']] = df['Year Week'].str.split('-', expand=True)
+        df['Year'] = df['Year'].astype(int)
+        df['Week'] = df['Week'].astype(int)
+        df.drop(columns=['Year Week'], inplace=True)
+    
+    # Convert date columns and add useful columns
     df['Date'] = pd.to_datetime(df['Start'], errors='coerce')
     df['Week'] = df['Date'].dt.isocalendar().week
     df['Year'] = df['Date'].dt.isocalendar().year
     df['Week_Label'] = df['Year'].astype(str) + " Week " + df['Week'].astype(str)
+    
     return df
 
 # Load the data here
@@ -132,10 +145,12 @@ for year in years:
             week_df = year_df[year_df['Week'] == week]
             label = f"Week {int(week)}"
             with st.expander(label):
-                display_df = week_df[[
+                expected_cols = [
                     "Store Name", "Store Number", "Prototype", "CPM", "Start", "TCO",
                     "Ops Walk", "Turnover", "Open to Train", "Store Opening", "Notes"
-                ]]
+                ]
+                # Use reindex to avoid KeyErrors if columns missing, filling missing with empty string
+                display_df = week_df.reindex(columns=expected_cols, fill_value="")
                 st.dataframe(display_df, use_container_width=True)
 
 # Optional footer
