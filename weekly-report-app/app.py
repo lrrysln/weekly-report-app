@@ -198,6 +198,18 @@ if submitted and password_input == "1234":
         week_number = today.isocalendar()[1]
         year = today.year
 
+    if st.button("Generate Detailed Weekly Summary Report"):
+        html_report = generate_weekly_summary(df, summary_df)
+        st.markdown("### Weekly Summary Report")
+        st.components.v1.html(html_report, height=1000, scrolling=True)
+        st.download_button(
+            label="📥 Download Summary as HTML",
+            data=html_report.encode('utf-8'),
+            file_name=f"Weekly_Summary_{datetime.datetime.now().strftime('%Y%m%d')}.html",
+            mime="text/html",
+            use_container_width=True
+        )
+        
         html = [
             "<html><head><style>",
             "body{font-family:Arial;padding:20px}",
@@ -253,17 +265,6 @@ if submitted and password_input == "1234":
         html.append("</body></html>")
         return "".join(html)
 
-    if st.button("Generate Detailed Weekly Summary Report"):
-        html_report = generate_weekly_summary(df, summary_df)
-        st.markdown("### Weekly Summary Report")
-        st.components.v1.html(html_report, height=1000, scrolling=True)
-        st.download_button(
-            label="📥 Download Summary as HTML",
-            data=html_report.encode('utf-8'),
-            file_name=f"Weekly_Summary_{datetime.datetime.now().strftime('%Y%m%d')}.html",
-            mime="text/html",
-            use_container_width=True
-        )
 else:
     if submitted:
         st.error("❌ Incorrect password.")
