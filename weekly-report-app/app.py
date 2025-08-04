@@ -1,10 +1,6 @@
 import streamlit as st
 import pandas as pd
 import datetime
-import os
-from io import BytesIO
-from dateutil.parser import parse
-from streamlit.components.v1 import html
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -20,169 +16,133 @@ client = gspread.authorize(creds)
 SPREADSHEET_ID = "1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w"
 WORKSHEET_NAME = "Sheet1"
 
-# ------------------- CONFIG -----------------------
-st.set_page_config(page_title="Construction Weekly Tracker", layout="wide")
-
-# ------------------- PASSWORD PROTECTION -----------------------
-PASSWORD = "1234"
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-
-if st.session_state.get("password_entered") != True:
-    password = st.text_input("Enter password:", type="password")
-    if st.button("Submit"):
-        if password == PASSWORD:
-            st.session_state["password_entered"] = True
-            st.rerun()
-        else:
-            st.error("Incorrect password.")
-    st.stop()
-
-# ------------------- LOAD AND CACHE DATA -----------------------
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=600)
 def load_data():
-    sheet = client.open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET_NAME)
-    data = sheet.get_all_records()
-    df = pd.DataFrame(data)
+    try:
+        sheet = client.open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET_NAME)
+        data = sheet.get_all_records()
+        df = pd.DataFrame(data)
+        return df
+    except Exception as e:
+        st.error(f"Failed to load data from Google Sheet: {e}")
+        return pd.DataFrame()
 
-    # Strip whitespace from columns
-    df.columns = df.columns.str.strip()
-
-    # Ensure 'Year Week' exists
-    if 'Year Week' in df.columns:
-        # Clean strings
-        df['Year Week'] = df['Year Week'].astype(str).str.strip()
-
-        # Mask for rows containing a dash
-        valid_mask = df['Year Week'].str.contains('-', na=False)
-
-        # Split only valid rows
-        split_vals = df.loc[valid_mask, 'Year Week'].str.split('-', expand=True)
-
-        # Assign Year and Week if split worked correctly
-        if split_vals.shape[1] == 2:
-            df.loc[valid_mask, 'Year'] = split_vals[0].astype(int)
-            df.loc[valid_mask, 'Week'] = split_vals[1].astype(int)
-        else:
-            st.warning("Warning: 'Year Week' splitting did not produce two columns.")
-
-        # Fill missing Year/Week with 0 or NA as needed
-        df['Year'] = df['Year'].fillna(0).astype(int)
-        df['Week'] = df['Week'].fillna(0).astype(int)
-
-        # Drop original column
-        df.drop(columns=['Year Week'], inplace=True)
-
-    # Parse 'Start' dates into datetime
-    df['Date'] = pd.to_datetime(df['Start'], errors='coerce')
-
-    # Overwrite Year and Week with ISO calendar from 'Date' column
-    df['Week'] = df['Date'].dt.isocalendar().week
-    df['Year'] = df['Date'].dt.isocalendar().year
-
-    df['Week_Label'] = df['Year'].astype(str) + " Week " + df['Week'].astype(str)
-
-    return df
-
-    
-    # Convert date columns and add useful columns
-    df['Date'] = pd.to_datetime(df['Start'], errors='coerce')
-    df['Week'] = df['Date'].dt.isocalendar().week
-    df['Year'] = df['Date'].dt.isocalendar().year
-    df['Week_Label'] = df['Year'].astype(str) + " Week " + df['Week'].astype(str)
-    
-    return df
-
-# Load the data here
 df = load_data()
 
-# ------------------- DETERMINE CURRENT WEEK -----------------------
+if df.empty:
+    st.warning("⚠️ No data loaded from Google Sheet yet.")
+    st.stop()
+
+# --- Preprocess Data ---
+df.columns = df.columns.str.strip()
+df['Year Week'] = pd.to_datetime(df['Year Week'], errors='coerce')
+df['Week Label'] = df['Year Week'].dt.strftime('%G Week %V')
+df['Year'] = df['Year Week'].dt.isocalendar().year
+df['Date'] = df['Year Week'].dt.date
+
+if 'Store Name' in df.columns:
+    df['Store Name'] = df['Store Name'].str.title()
+if 'Store Number' in df.columns:
+    df['Store Number'] = df['Store Number'].astype(str).str.strip()
+if 'Baseline' in df.columns:
+    df['Baseline'] = df['Baseline'].astype(str).str.strip()
+
+# --- Current Week Display (shown to all users) ---
 today = datetime.date.today()
-start_of_week = today - datetime.timedelta(days=today.weekday() + 1)  # Sunday
+start_of_week = today - datetime.timedelta(days=today.weekday() + 1 if today.weekday() != 6 else 0)
+start_of_week = start_of_week if today.weekday() != 6 else today
 end_of_week = start_of_week + datetime.timedelta(days=6)
 
-current_week_df = df[(df['Date'] >= pd.to_datetime(start_of_week)) & (df['Date'] <= pd.to_datetime(end_of_week))]
+current_week_number = start_of_week.isocalendar()[1]
+current_year = start_of_week.year
+week_label = f"{current_year} Week {current_week_number:02d}"
 
-# ------------------- GENERATE WEEKLY SUMMARY REPORT -----------------------
-def generate_weekly_report(data):
-    summary = f"""
-    <h2 style='color:#004aad'>Weekly Construction Summary – Week {start_of_week.strftime('%U')} ({start_of_week} to {end_of_week})</h2>
-    <p><strong>Total Entries:</strong> {len(data)}</p>
-    <table border='1' style='border-collapse: collapse; width:100%'>
-        <tr>
-            <th>Store Name</th>
-            <th>Store #</th>
-            <th>Prototype</th>
-            <th>CPM</th>
-            <th>Start</th>
-            <th>TCO</th>
-            <th>Ops Walk</th>
-            <th>Turnover</th>
-            <th>Open to Train</th>
-            <th>Store Opening</th>
-            <th>Notes</th>
-        </tr>
-    """
-    for _, row in data.iterrows():
-        summary += f"""
-            <tr>
-                <td>{row.get('Store Name','')}</td>
-                <td>{row.get('Store Number','')}</td>
-                <td>{row.get('Prototype','')}</td>
-                <td>{row.get('CPM','')}</td>
-                <td>{row.get('Start','')}</td>
-                <td>{row.get('TCO','')}</td>
-                <td>{row.get('Ops Walk','')}</td>
-                <td>{row.get('Turnover','')}</td>
-                <td>{row.get('Open to Train','')}</td>
-                <td>{row.get('Store Opening','')}</td>
-                <td>{row.get('Notes','').replace('\n', '<br>')}</td>
-            </tr>
-        """
-    summary += "</table>"
-    return summary
+current_week_df = df[(df['Date'] >= start_of_week) & (df['Date'] <= end_of_week)]
 
-# ------------------- MAIN UI -----------------------
-st.title("🏗️ Construction Weekly Tracker")
+st.markdown(
+    f"""### 📋 <span style='color:red'>{len(current_week_df)}</span> Submissions for the week of {start_of_week.strftime('%B %d')}–{end_of_week.strftime('%B %d')} (week {current_week_number} of the year), {current_year}""",
+    unsafe_allow_html=True
+)
+columns_to_show = ['Store Number', 'Store Name', 'CPM', 'Prototype', 'Week Label']
+st.dataframe(current_week_df[columns_to_show].reset_index(drop=True), use_container_width=True)
 
-# 👉 CURRENT WEEK REPORT
-st.subheader(f"📋 Current Week Report: {start_of_week.strftime('%B %d')} - {end_of_week.strftime('%B %d, %Y')}")
-if current_week_df.empty:
-    st.warning("No submissions yet for this week.")
+# --- Password-Protected Report ---
+st.subheader("🔐 Generate Weekly Summary Report")
+
+with st.form("password_form"):
+    password_input = st.text_input("Enter Password", type="password")
+    submitted = st.form_submit_button("Submit")
+
+if submitted and password_input == "1234":
+    st.markdown("## 🗓️ Weekly Submission Volume by Year")
+
+    years = sorted(df['Year'].dropna().unique(), reverse=True)
+    for year in years:
+        with st.expander(f"📁 {year}"):
+            year_data = df[df['Year'] == year]
+            weekly_counts = year_data.groupby('Week Label').size().reset_index(name='Count')
+            for _, row in weekly_counts.iterrows():
+                week = row['Week Label']
+                count = row['Count']
+                with st.expander(f"📆 {week} — {count} submission(s)"):
+                    st.dataframe(year_data[year_data['Week Label'] == week].reset_index(drop=True))
+
 else:
-    report_html = generate_weekly_report(current_week_df)
-    html(report_html, height=600, scrolling=True)
+    if submitted:
+        st.error("❌ Incorrect password.")
+    else:
+        st.info("Please enter the password and click Submit to view the full report.")
 
-    # Download as HTML
-    download_button = st.download_button(
-        label="📥 Download Weekly Summary (HTML)",
-        data=report_html,
-        file_name=f"Weekly_Summary_{start_of_week}_to_{end_of_week}.html",
-        mime="text/html"
-    )
+# --- Continue with rest of processing ---
+df['Store Opening'] = pd.to_datetime(df['Store Opening'], errors='coerce')
+baseline_df = df[df['Baseline'] == "/True"].copy()
+baseline_map = baseline_df.set_index('Store Number')['Store Opening'].to_dict()
 
-# 👉 YEAR/WEEK HISTORICAL REVIEW
-st.markdown("---")
-st.subheader("📚 Past Weekly Submissions by Year")
+def compute_trend(row):
+    store_number = row['Store Number']
+    current_open = row['Store Opening']
+    if row['Baseline'] == "/True":
+        return "baseline"
+    baseline_open = baseline_map.get(store_number)
+    if pd.isna(current_open) or pd.isna(baseline_open):
+        return "no baseline dates"
+    if current_open > baseline_open:
+        return "pushed"
+    elif current_open < baseline_open:
+        return "pulled in"
+    else:
+        return "held"
 
-years = sorted(df['Year'].dropna().unique(), reverse=True)
+df['Trend'] = df.apply(compute_trend, axis=1)
 
-for year in years:
-    with st.expander(f"📅 {year}"):
-        year_df = df[df['Year'] == year]
-        weeks = sorted(year_df['Week'].dropna().unique(), reverse=True)
-        for week in weeks:
-            week_df = year_df[year_df['Week'] == week]
-            label = f"Week {int(week)}"
-            with st.expander(label):
-                expected_cols = [
-                    "Store Name", "Store Number", "Prototype", "CPM", "Start", "TCO",
-                    "Ops Walk", "Turnover", "Open to Train", "Store Opening", "Notes"
-                ]
-                # Use reindex to avoid KeyErrors if columns missing, filling missing with empty string
-                display_df = week_df.reindex(columns=expected_cols, fill_value="")
-                st.dataframe(display_df, use_container_width=True)
+def compute_delta(row):
+    baseline_open = baseline_map.get(row['Store Number'])
+    if pd.isna(row['Store Opening']) or pd.isna(baseline_open):
+        return 0
+    return (row['Store Opening'] - baseline_open).days
 
-# Optional footer
-st.markdown("<br><hr><p style='text-align:center;'>Construction Weekly Tracker • © 2025</p>", unsafe_allow_html=True)
+df['Store Opening Delta'] = df.apply(compute_delta, axis=1)
 
+def flag_delta(delta):
+    if isinstance(delta, int) and abs(delta) > 5:
+        return '<span style="color:red;font-weight:bold;">*</span>'
+    return ""
+
+df['Flag'] = df['Store Opening Delta'].apply(flag_delta)
+
+keywords = ["behind schedule", "lagging", "delay", "critical path", "cpm impact", "work on hold", "stop work order",
+            "reschedule", "off track", "schedule drifting", "missed milestone", "budget overrun", "cost impact",
+            "change order pending", "claim submitted", "dispute", "litigation risk", "schedule variance",
+            "material escalation", "labor shortage", "equipment shortage", "low productivity", "rework required",
+            "defects found", "qc failure", "weather delays", "permit delays", "regulatory hurdles",
+            "site access issues", "awaiting sign-off", "conflict", "identified risk", "mitigation", "forecast revised"]
+
+def check_notes(text):
+    text_lower = str(text).lower()
+    return any(kw in text_lower for kw in keywords)
+
+df['Notes'] = df['Notes'].fillna("")
+df['Notes Filtered'] = df['Notes'].apply(lambda x: x if check_notes(x) else "see report below")
+
+summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes Filtered']
+summary_df = df[summary_cols].drop_duplicates(subset=['Store Number']).reset_index(drop=True)
