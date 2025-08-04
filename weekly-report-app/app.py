@@ -168,6 +168,26 @@ if submitted and password_input == "1234":
     st.subheader("📄 Weekly Report (Preview)")
     st.components.v1.html(html_report, height=1000, scrolling=True)
 
+    for _, row in summary_df.iterrows():
+    store_name = row['Store Name']
+    store_number = row['Store Number']
+    prototype = row['Prototype']
+    cpm = row['CPM']
+    flag = row['Flag']
+    delta = row['Store Opening Delta']
+    trend = row['Trend']
+    notes = row['Notes Filtered'].replace('\n', '<br>')
+
+    card = f"""
+    <div style="border:1px solid #ccc;padding:15px;margin-bottom:10px;border-radius:10px;">
+        <h3 style="margin:0;">🏪 {store_name} ({store_number})</h3>
+        <p><strong>🧬 Prototype:</strong> {prototype} | <strong>👷 CPM:</strong> {cpm} | <strong>🚩 Flag:</strong> {flag}</p>
+        <p><strong>📅 Store Opening Delta:</strong> {delta} days | <strong>📈 Trend:</strong> {trend}</p>
+        <p><strong>📝 Notes:</strong><br>{notes}</p>
+    </div>
+    """
+    html.append(card)
+
     b64 = base64.b64encode(html_report.encode()).decode()
     href = f'<a href="data:text/html;base64,{b64}" download="weekly_summary.html">📥 Download Full Report as HTML</a>'
     st.markdown(href, unsafe_allow_html=True)
