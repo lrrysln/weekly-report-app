@@ -220,28 +220,28 @@ def generate_weekly_summary(df, summary_df, password):
             html.append(f"<div style='font-weight:bold; font-size:1.2em;'>{row.get('Store Number', '')} - {row.get('Store Name', '')}, {row.get('Prototype', '')} ({row.get('CPM', '')})</div>")
 
             date_fields = ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening"]
-html.append("<li><span class='label'>Dates:</span><ul>")
-for field in date_fields:
-    val = row.get(field)
-    # Try to parse val as date if it's a string
-    try:
-        if isinstance(val, str) and val.strip():
-            val_date = pd.to_datetime(val, errors='coerce')
-        elif isinstance(val, (datetime.datetime, datetime.date)):
-            val_date = val
-        else:
-            val_date = None
+            html.append("<li><span class='label'>Dates:</span><ul>")
+            for field in date_fields:
+                val = row.get(field)
+                # Try to parse val as date if it's a string
+                try:
+                    if isinstance(val, str) and val.strip():
+                        val_date = pd.to_datetime(val, errors='coerce')
+                    elif isinstance(val, (datetime.datetime, datetime.date)):
+                        val_date = val
+                    else:
+                        val_date = None
 
-        if val_date is not None and not pd.isna(val_date):
-            val = val_date.strftime("%m/%d/%y")
-        else:
-            val = "N/A"
-    except Exception:
-        # fallback to raw string if parsing fails
-        val = str(val) if val else "N/A"
-    
-    html.append(f"<li style='margin-left: 40px;'><u>{field}</u>: {val}</li>")
-html.append("</ul></li>")
+                    if val_date is not None and not pd.isna(val_date):
+                        val = val_date.strftime("%m/%d/%y")
+                    else:
+                        val = "N/A"
+                except Exception:
+                    # fallback to raw string if parsing fails
+                    val = str(val) if val else "N/A"
+
+                html.append(f"<li style='margin-left: 40px;'><u>{field}</u>: {val}</li>")
+            html.append("</ul></li>")
 
             notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
             if notes:
