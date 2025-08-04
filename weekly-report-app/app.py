@@ -53,13 +53,13 @@ if 'Baseline' in df.columns:
 
 # --- Current Week Display (shown to all users) ---
 today = datetime.date.today()
+# Calculate start of week Sunday
 start_of_week = today - datetime.timedelta(days=today.weekday() + 1 if today.weekday() != 6 else 0)
 start_of_week = start_of_week if today.weekday() != 6 else today
 end_of_week = start_of_week + datetime.timedelta(days=6)
 
 current_week_number = start_of_week.isocalendar()[1]
 current_year = start_of_week.year
-week_label = f"{current_year} Week {current_week_number:02d}"
 
 current_week_df = df[(df['Date'] >= start_of_week) & (df['Date'] <= end_of_week)]
 
@@ -80,7 +80,6 @@ with st.form("password_form"):
 if submitted and password_input == "1234":
 
     st.markdown("## 🗓️ Weekly Submission Volume by Year")
-
     years = sorted(df['Year'].dropna().unique(), reverse=True)
     for year in years:
         with st.expander(f"📁 {year}"):
@@ -94,14 +93,17 @@ if submitted and password_input == "1234":
 
     # --- Detailed Weekly Summary Report ---
 
-    # Separate baseline & non-baseline entries
+    # Create baseline map once
     baseline_df = df[df['Baseline'] == "/True"].copy()
     baseline_map = baseline_df.set_index('Store Number')['Store Opening'].to_dict()
 
-    # Trend calculation
+    # Convert Store Opening to datetime
+    df['Store Opening'] = pd.to_datetime(df['Store Opening'], errors='coerce')
+
+    # Trend calculation function
     def compute_trend(row):
         store_number = row['Store Number']
-        current_open = row['Store Opening'] if 'Store Opening' in row else None
+        current_open = row['Store Opening']
         if row['Baseline'] == "/True":
             return "baseline"
         baseline_open = baseline_map.get(store_number)
@@ -114,7 +116,9 @@ if submitted and password_input == "1234":
         else:
             return "held"
 
-    # Calculate delta
+    df['Trend'] = df.apply(compute_trend, axis=1)
+
+    # Delta calculation function
     def compute_delta(row):
         baseline_open = baseline_map.get(row['Store Number'])
         if pd.isna(row['Store Opening']) or pd.isna(baseline_open):
@@ -123,7 +127,7 @@ if submitted and password_input == "1234":
 
     df['Store Opening Delta'] = df.apply(compute_delta, axis=1)
 
-    # Flag logic with red asterisk
+    # Flagging significant delta
     def flag_delta(delta):
         if isinstance(delta, int) and abs(delta) > 5:
             return '<span style="color:red;font-weight:bold;">*</span>'
@@ -131,13 +135,15 @@ if submitted and password_input == "1234":
 
     df['Flag'] = df['Store Opening Delta'].apply(flag_delta)
 
-    # Filter notes for keywords
-    keywords = ["behind schedule", "lagging", "delay", "critical path", "cpm impact", "work on hold", "stop work order",
-                "reschedule", "off track", "schedule drifting", "missed milestone", "budget overrun", "cost impact",
-                "change order pending", "claim submitted", "dispute", "litigation risk", "schedule variance",
-                "material escalation", "labor shortage", "equipment shortage", "low productivity", "rework required",
-                "defects found", "qc failure", "weather delays", "permit delays", "regulatory hurdles",
-                "site access issues", "awaiting sign-off", "conflict", "identified risk", "mitigation", "forecast revised"]
+    # Notes keyword filtering
+    keywords = [
+        "behind schedule", "lagging", "delay", "critical path", "cpm impact", "work on hold", "stop work order",
+        "reschedule", "off track", "schedule drifting", "missed milestone", "budget overrun", "cost impact",
+        "change order pending", "claim submitted", "dispute", "litigation risk", "schedule variance",
+        "material escalation", "labor shortage", "equipment shortage", "low productivity", "rework required",
+        "defects found", "qc failure", "weather delays", "permit delays", "regulatory hurdles",
+        "site access issues", "awaiting sign-off", "conflict", "identified risk", "mitigation", "forecast revised"
+    ]
 
     def check_notes(text):
         text_lower = str(text).lower()
@@ -149,7 +155,7 @@ if submitted and password_input == "1234":
     summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes Filtered']
     summary_df = df[summary_cols].drop_duplicates(subset=['Store Number']).reset_index(drop=True)
 
-    # Custom Bar Colors
+    # Plot function
     def create_trend_figure(trend_counts):
         hex_colors = {
             "held": "#FDC01A",
@@ -159,8 +165,8 @@ if submitted and password_input == "1234":
             "no baseline dates": "#999999"
         }
         fig, ax = plt.subplots(figsize=(10, 5))
-        bars = ax.bar(trend_counts.index, trend_counts.values,
-                      color=[hex_colors.get(x, "#999") for x in trend_counts.index])
+        ax.bar(trend_counts.index, trend_counts.values,
+               color=[hex_colors.get(x, "#999") for x in trend_counts.index])
         ax.set_ylabel("Count")
         ax.set_xlabel("Trend")
         ax.set_title("📊 Store Opening Trend Breakdown")
@@ -215,6 +221,25 @@ if submitted and password_input == "1234":
                 cpm = row.get('CPM', '')
                 html.append(f"<div style='font-weight:bold; font-size:1.2em;'>{store_number} - {store_name}, {prototype} ({cpm})</div>")
 
+                date_fields = ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening"]
+                html.append("<li><span class='label'>Dates:</span><ul>")
+                for field in date_fields:
+                    val = row.get(field)
+                    if isinstance(val, (datetime.datetime, datetime.date)):
+                        val = val.strftime("%m/%d/%y")
+                    baseline_val = row.get(f"⚪ Baseline {field}")
+                    if pd.notna(baseline_val) and val == baseline_val:
+                        html.append(f"<li><b style='color:red;'> Baseline</b>: {field} - {val}</li>")
+                    else:
+                        html.append(f"<li>{field}: {val}</li>")
+                html.append("</ul></li>")
+
+                notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
+                if notes:
+                    html.append("<li><span class='label'>Notes:</span><ul>")
+                    html += [f"<li style='margin-left: 40px;'>{n}</li>" for n in notes]
+                    html.append("</ul></li>")
+
                 html.append("</ul></div>")
 
         html.append("</body></html>")
@@ -231,12 +256,8 @@ if submitted and password_input == "1234":
             mime="text/html",
             use_container_width=True
         )
+
+elif submitted:
+    st.error("❌ Incorrect password.")
 else:
-    if submitted:
-        st.error("❌ Incorrect password.")
-    else:
-        st.info("Please enter the password and click Submit to view the full report.")
-
-
-
-
+    st.info("Please enter the password and click Submit to view the full report.")
