@@ -44,16 +44,41 @@ def load_data():
     sheet = client.open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET_NAME)
     data = sheet.get_all_records()
     df = pd.DataFrame(data)
-    
-    # Strip whitespace from column names
+
+    # Strip whitespace from columns
     df.columns = df.columns.str.strip()
-    
-    # If "Year Week" is one column, split into Year and Week
+
+    # Ensure 'Year Week' exists
     if 'Year Week' in df.columns:
-        df[['Year', 'Week']] = df['Year Week'].str.split('-', expand=True)
-        df['Year'] = df['Year'].astype(int)
-        df['Week'] = df['Week'].astype(int)
+        # Check rows that contain '-'
+        mask = df['Year Week'].astype(str).str.contains('-', na=False)
+
+        # Create empty Year and Week columns
+        df['Year'] = pd.NA
+        df['Week'] = pd.NA
+
+        # Only split where mask is True (values contain '-')
+        split_vals = df.loc[mask, 'Year Week'].str.split('-', expand=True)
+
+        if split_vals.shape[1] == 2:
+            df.loc[mask, 'Year'] = split_vals[0].astype(int)
+            df.loc[mask, 'Week'] = split_vals[1].astype(int)
+        else:
+            st.warning("Warning: 'Year Week' splitting did not produce two columns.")
+
+        # If you want, drop the original column
         df.drop(columns=['Year Week'], inplace=True)
+
+    # Parse dates from 'Start'
+    df['Date'] = pd.to_datetime(df['Start'], errors='coerce')
+
+    # Overwrite Year and Week with ISO calendar values from Start date (more reliable)
+    df['Week'] = df['Date'].dt.isocalendar().week
+    df['Year'] = df['Date'].dt.isocalendar().year
+
+    df['Week_Label'] = df['Year'].astype(str) + " Week " + df['Week'].astype(str)
+
+    return df
     
     # Convert date columns and add useful columns
     df['Date'] = pd.to_datetime(df['Start'], errors='coerce')
