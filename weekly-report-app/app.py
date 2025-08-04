@@ -87,8 +87,68 @@ if submitted:
 
 if st.session_state.get('authenticated', False):
     if st.button("Generate Detailed Weekly Summary Report"):
-        # Put your report generation code here
+
+        # Strip Baseline column to be safe
+        df['Baseline'] = df['Baseline'].astype(str).str.strip()
+
+        baseline_df = df[df['Baseline'] == "/True"].copy()
+        baseline_df['Store Opening'] = pd.to_datetime(baseline_df['Store Opening'], errors='coerce')
+        baseline_map = baseline_df.set_index('Store Number')['Store Opening'].to_dict()
+        df['Store Opening'] = pd.to_datetime(df['Store Opening'], errors='coerce')
+
+        def compute_trend(row):
+            store_number = row['Store Number']
+            current_open = row['Store Opening']
+            if row['Baseline'] == "/True":
+                return "baseline"
+            baseline_open = baseline_map.get(store_number)
+            if pd.isna(current_open) or pd.isna(baseline_open):
+                return "no baseline dates"
+            if current_open > baseline_open:
+                return "pushed"
+            elif current_open < baseline_open:
+                return "pulled in"
+            else:
+                return "held"
+
+        df['Trend'] = df.apply(compute_trend, axis=1)
+
+        def compute_delta(row):
+            baseline_open = baseline_map.get(row['Store Number'])
+            if pd.isna(row['Store Opening']) or pd.isna(baseline_open):
+                return 0
+            return (row['Store Opening'] - baseline_open).days
+
+        df['Store Opening Delta'] = df.apply(compute_delta, axis=1)
+
+        def flag_delta(delta):
+            if isinstance(delta, int) and abs(delta) > 5:
+                return '<span style="color:red;font-weight:bold;">*</span>'
+            return ""
+
+        df['Flag'] = df['Store Opening Delta'].apply(flag_delta)
+
+        keywords = [
+            "behind schedule", "lagging", "delay", "critical path", "cpm impact", "work on hold", "stop work order",
+            "reschedule", "off track", "schedule drifting", "missed milestone", "budget overrun", "cost impact",
+            "change order pending", "claim submitted", "dispute", "litigation risk", "schedule variance",
+            "material escalation", "labor shortage", "equipment shortage", "low productivity", "rework required",
+            "defects found", "qc failure", "weather delays", "permit delays", "regulatory hurdles",
+            "site access issues", "awaiting sign-off", "conflict", "identified risk", "mitigation", "forecast revised"
+        ]
+
+        def check_notes(text):
+            text_lower = str(text).lower()
+            return any(kw in text_lower for kw in keywords)
+
+        df['Notes'] = df['Notes'].fillna("")
+        df['Notes Filtered'] = df['Notes'].apply(lambda x: x if check_notes(x) else "see report below")
+
+        summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes Filtered']
+        summary_df = df[summary_cols].drop_duplicates(subset=['Store Number']).reset_index(drop=True)
+
         html_report = generate_weekly_summary(df, summary_df)
+
         st.markdown("### Weekly Summary Report")
         st.components.v1.html(html_report, height=1000, scrolling=True)
         st.download_button(
@@ -98,23 +158,6 @@ if st.session_state.get('authenticated', False):
             mime="text/html",
             use_container_width=True
         )
-else:
-    st.info("Please enter the password and click Submit to view the full report.")
-
-if submitted and password_input == "1234":
-
-    st.markdown("## 🗓️ Weekly Submission Volume by Year")
-
-    years = sorted(df['Year'].dropna().unique(), reverse=True)
-    for year in years:
-        with st.expander(f"📁 {year}"):
-            year_data = df[df['Year'] == year]
-            weekly_counts = year_data.groupby('Week Label').size().reset_index(name='Count')
-            for _, row in weekly_counts.iterrows():
-                week = row['Week Label']
-                count = row['Count']
-                with st.expander(f"📆 {week} — {count} submission(s)"):
-                    st.dataframe(year_data[year_data['Week Label'] == week].reset_index(drop=True))
 
     # --- Detailed Weekly Summary Report ---
 
