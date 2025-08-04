@@ -78,24 +78,25 @@ with st.form("password_form"):
     submitted = st.form_submit_button("Submit")
 
 if submitted and password_input == "1234":
+
     st.markdown("## 🗓️ Weekly Submission Volume by Year")
 
-    # Your existing code...
+    years = sorted(df['Year'].dropna().unique(), reverse=True)
+    for year in years:
+        with st.expander(f"📁 {year}"):
+            year_data = df[df['Year'] == year]
+            weekly_counts = year_data.groupby('Week Label').size().reset_index(name='Count')
+            for _, row in weekly_counts.iterrows():
+                week = row['Week Label']
+                count = row['Count']
+                with st.expander(f"📆 {week} — {count} submission(s)"):
+                    st.dataframe(year_data[year_data['Week Label'] == week].reset_index(drop=True))
 
+    # --- Detailed Weekly Summary Report ---
+
+    # Separate baseline & non-baseline entries
     baseline_df = df[df['Baseline'] == "/True"].copy()
     baseline_map = baseline_df.set_index('Store Number')['Store Opening'].to_dict()
-
-    # Debug prints here (safe because baseline_map exists)
-    st.write("Sample baseline map entries:", list(baseline_map.items())[:5])
-    st.write("Sample Store Opening values:", df['Store Opening'].head())
-    st.write("Unique Baseline values:", df['Baseline'].unique())
-
-    # Rest of your code for trends, report generation, etc.
-else:
-    if submitted:
-        st.error("❌ Incorrect password.")
-    else:
-        st.info("Please enter the password and click Submit to view the full report.")
 
     # Trend calculation
     def compute_trend(row):
@@ -259,6 +260,5 @@ else:
         st.info("Please enter the password and click Submit to view the full report.")
 
 
-st.write("Sample baseline map entries:", list(baseline_map.items())[:5])
-st.write("Sample Store Opening values:", df['Store Opening'].head())
-st.write("Unique Baseline values:", df['Baseline'].unique())
+
+
