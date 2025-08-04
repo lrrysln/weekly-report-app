@@ -14,15 +14,15 @@ PASSWORD = "1234"
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
-if not st.session_state.authenticated:
-    st.subheader("🔐 Enter Password to Access Weekly Report")
-    input_password = st.text_input("Password", type="password")
+if st.session_state.get("password_entered") != True:
+    password = st.text_input("Enter password:", type="password")
     if st.button("Submit"):
-        if input_password == PASSWORD:
-            st.session_state.authenticated = True
-            st.experimental_rerun()
+        if password == "yourpassword":
+            st.session_state["password_entered"] = True
+            st.experimental_rerun()  # <-- valid here
         else:
             st.error("Incorrect password.")
+
     st.stop()
 
 # ------------------- LOAD AND CACHE DATA -----------------------
