@@ -177,11 +177,6 @@ df['Notes Filtered'] = df['Notes'].apply(lambda x: x if check_notes(x) else "see
 summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes Filtered']
 summary_df = df[summary_cols].drop_duplicates(subset=['Store Number']).reset_index(drop=True)
 
-# Main Display
-st.subheader("📋 Submitted Reports Overview")
-st.markdown(f"<h4><span style='color:red;'><b>{len(df)}</b></span> form responses have been submitted</h4>", unsafe_allow_html=True)
-st.dataframe(df[['Store Number', 'Store Name', 'CPM', 'Prototype']], use_container_width=True)
-
 # --- (Optional) The rest of your report generation and plotting code here ---
 # (If you want me to add that too, just ask!)
 
