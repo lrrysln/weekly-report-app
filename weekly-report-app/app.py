@@ -85,7 +85,7 @@ if submitted and password_input == "1234":
     for year in years:
         with st.expander(f"📁 {year}"):
             year_data = df[df['Year'] == year]
-            weekly_counts = year_data.groupby('Week Label').size().reset_index(name='Count')
+            weekly_counts = year_data.groupby('Week Label').size().reset_index(name='Count')           
             for _, row in weekly_counts.iterrows():
                 week = row['Week Label']
                 count = row['Count']
