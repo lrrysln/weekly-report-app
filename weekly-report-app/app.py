@@ -1,162 +1,90 @@
 import streamlit as st
 import pandas as pd
-import datetime
-import re
-import matplotlib.pyplot as plt
-import gspread
-from google.oauth2.service_account import Credentials
 import base64
-from io import BytesIO
+from datetime import datetime
 
-# --- Auth & Google Sheets Setup ---
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
+st.set_page_config(layout="wide")
+st.title("📊 Weekly Construction Summary Report")
 
-creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
-client = gspread.authorize(creds)
+# Password gate
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
 
-SPREADSHEET_ID = "1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w"
-WORKSHEET_NAME = "Sheet1"
-
-@st.cache_data(ttl=600)
-def load_data():
-    try:
-        sheet = client.open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET_NAME)
-        data = sheet.get_all_records()
-        df = pd.DataFrame(data)
-        return df
-    except Exception as e:
-        st.error(f"Failed to load data from Google Sheet: {e}")
-        return pd.DataFrame()
-
-df = load_data()
-
-if df.empty:
-    st.warning("⚠️ No data loaded from Google Sheet yet.")
+if not st.session_state.authenticated:
+    with st.form("auth_form", clear_on_submit=False):
+        password = st.text_input("Enter password", type="password")
+        submitted = st.form_submit_button("Submit")
+        if submitted:
+            if password == st.secrets["access_password"]:
+                st.session_state.authenticated = True
+            else:
+                st.error("Incorrect password")
     st.stop()
 
-# --- Preprocess Data ---
-df.columns = df.columns.str.strip()
-df['Year Week'] = pd.to_datetime(df['Year Week'], errors='coerce')
-df['Week Label'] = df['Year Week'].dt.strftime('%G Week %V')
-df['Year'] = df['Year Week'].dt.isocalendar().year
-df['Date'] = df['Year Week'].dt.date
+# Upload Excel file
+uploaded_file = st.file_uploader("Upload the Weekly Excel File", type=["xlsx"])
 
-if 'Store Name' in df.columns:
-    df['Store Name'] = df['Store Name'].str.title()
-if 'Store Number' in df.columns:
-    df['Store Number'] = df['Store Number'].astype(str).str.strip()
-if 'Baseline' in df.columns:
-    df['Baseline'] = df['Baseline'].astype(str).str.strip()
+if uploaded_file:
+    df = pd.read_excel(uploaded_file)
 
-# --- Current Week Display ---
-today = datetime.date.today()
-start_of_week = today - datetime.timedelta(days=today.weekday() + 1 if today.weekday() != 6 else 0)
-start_of_week = start_of_week if today.weekday() != 6 else today
-end_of_week = start_of_week + datetime.timedelta(days=6)
+    # Filter necessary summary columns
+    summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes Filtered']
+    summary_df = df[summary_cols].drop_duplicates(subset=['Store Number']).reset_index(drop=True)
 
-current_week_number = start_of_week.isocalendar()[1]
-current_year = start_of_week.year
+    # ✅ Generate and display the HTML report
+    def generate_weekly_summary(df, summary_df):
+        def format_date(value):
+            if pd.isna(value):
+                return "N/A"
+            try:
+                return pd.to_datetime(value).strftime("%m/%d/%y")
+            except:
+                return str(value)
 
-current_week_df = df[(df['Date'] >= start_of_week) & (df['Date'] <= end_of_week)]
+        html = []
+        html.append("<div style='font-family: Arial, sans-serif;'>")
+        html.append("<h2 style='text-align: center;'>🗓️ Detailed Weekly Summary</h2>")
 
-st.markdown(
-    f"""### 📋 <span style='color:red'>{len(current_week_df)}</span> Submissions for the week of {start_of_week.strftime('%B %d')}–{end_of_week.strftime('%B %d')} (week {current_week_number} of the year), {current_year}""",
-    unsafe_allow_html=True
-)
+        for _, row in summary_df.iterrows():
+            store_num = row['Store Number']
+            store_df = df[df['Store Number'] == store_num]
 
-columns_to_show = ['Store Number', 'Store Name', 'CPM', 'Prototype', 'Week Label']
-st.dataframe(current_week_df[columns_to_show].reset_index(drop=True), use_container_width=True)
+            html.append(f"<h3 style='margin-bottom: 0;'>{row['Store Name']} ({store_num}) - {row['Prototype']}</h3>")
+            html.append(f"<p><strong>CPM:</strong> {row['CPM']} | <strong>Flag:</strong> {row['Flag']}</p>")
+            html.append(f"<p><strong>Store Opening Delta:</strong> {row['Store Opening Delta']} | <strong>Trend:</strong> {row['Trend']}</p>")
 
-# --- Password Protected Section ---
-st.subheader("🔐 Generate Weekly Summary Report")
-password = st.text_input("Enter Password", type="password")
+            notes = row['Notes Filtered']
+            notes_html = "<ul style='margin-top: 0;'>"
+            for note in str(notes).split("\n"):
+                if note.strip():
+                    notes_html += f"<li>{note.strip()}</li>"
+            notes_html += "</ul>"
 
-if password == "1234":
-    def generate_weekly_summary(df, summary_df, password):
-        if password != "1234":
-            return None, "❌ Incorrect password."
+            html.append(f"<p><strong>📝 Notes:</strong>{notes_html}</p>")
 
-        trend_order = ["pulled in", "pushed", "held", "baseline", "no baseline dates"]
-        trend_counts = summary_df['Trend'].value_counts().reindex(trend_order, fill_value=0)
-        fig = create_trend_figure(trend_counts)
-        img_base64 = fig_to_base64(fig)
+            # Group date columns
+            milestone_headers = ['TCO', 'Ops Walk', 'Turnover', 'Open to Train', 'Store Opening']
+            date_section = "<p><strong>📅 Dates:</strong></p><ul style='margin-top: 0;'>"
+            for header in milestone_headers:
+                milestone_dates = store_df[header].dropna().unique()
+                milestone_dates_formatted = [format_date(d) for d in milestone_dates]
+                milestone_html = "<ul style='margin-top: 0; margin-left: 20px;'>"
+                for date in milestone_dates_formatted:
+                    milestone_html += f"<li>{date}</li>"
+                milestone_html += "</ul>"
+                date_section += f"<li><u>{header}</u>: {milestone_html}</li>"
+            date_section += "</ul>"
 
-        today = datetime.date.today()
-        week_number = today.isocalendar()[1]
-        year = today.year
+            html.append(date_section)
+            html.append("<hr style='margin: 30px 0;'>")
 
-        html = [
-            "<html><head><style>",
-            "body{font-family:Arial;padding:20px}",
-            "h1{text-align:center}",
-            "h2{background:#cce5ff;padding:10px;border-radius:4px}",
-            ".entry{border:1px solid #ccc;padding:10px;margin:10px 0;border-radius:4px;background:#f9f9f9}",
-            "ul{margin:0;padding-left:20px}",
-            ".label{font-weight:bold}",
-            "table {border-collapse: collapse; width: 100%; text-align: center;}",
-            "th, td {border: 1px solid #ddd; padding: 8px; text-align: center;}",
-            "th {background-color: #f2f2f2; text-decoration: underline;}",
-            "</style></head><body>",
-            f"<h1>{year} Week: {week_number} Weekly Summary Report</h1>",
-            f'<img src="data:image/png;base64,{img_base64}" style="max-width:800px; display:block; margin:auto;">',
-            "<h2>Trend Summary Table</h2>",
-            trend_counts.rename_axis("Trend").reset_index().rename(columns={"index": "Trend", "Trend": "Count"}).to_html(index=False),
-            "<h2>Executive Summary</h2>",
-            summary_df.to_html(index=False, escape=False),
-            "<hr>"
-        ]
+        html.append("</div>")
+        return "".join(html)
 
-        group_col = "Subject" if "Subject" in df.columns else "Store Name"
-        for group_name, group_df in df.groupby(group_col):
-            html.append(f"<h2>{group_name}</h2>")
-            for _, row in group_df.iterrows():
-                store_number = row.get('Store Number', '')
-                store_name = row.get('Store Name', '')
-                prototype = row.get('Prototype', '')
-                cpm = row.get('CPM', '')
-                html.append(f"<div style='font-weight:bold; font-size:1.2em;'>{store_number} - {store_name}, {prototype} ({cpm})</div>")
+    html_report = generate_weekly_summary(df, summary_df)
+    st.subheader("📄 Weekly Report (Preview)")
+    st.components.v1.html(html_report, height=1000, scrolling=True)
 
-                date_fields = ["TCO", "Ops Walk", "Turnover", "Open to Train", "Store Opening"]
-                html.append("<li><span class='label'>Dates:</span><ul>")
-                for field in date_fields:
-                    val = row.get(field)
-                    if isinstance(val, (datetime.datetime, datetime.date)):
-                        val = val.strftime("%m/%d/%y")
-                    else:
-                        val = str(val) if val else "N/A"
-                    html.append(f"<li style='margin-left: 40px;'><span style='text-decoration: underline;'>{field}</span>: {val}</li>")
-                html.append("</ul></li>")
-
-                notes = [re.sub(r"^[\s•\-–●]+", "", n) for n in str(row.get("Notes", "")).splitlines() if n.strip()]
-                if notes:
-                    html.append("<li><span class='label'>Notes:</span><ul>")
-                    html += [f"<li style='margin-left: 40px;'>{n}</li>" for n in notes]
-                    html.append("</ul></li>")
-
-                html.append("</ul></div>")
-
-        html.append("</body></html>")
-        return df, "".join(html)
-
-    if st.button("Generate Detailed Weekly Summary Report"):
-        df_result, html = generate_weekly_summary(df, summary_df, password)
-        if html is not None:
-            st.markdown("### Weekly Summary")
-            st.components.v1.html(html, height=1000, scrolling=True)
-            st.download_button(
-                label="📥 Download Summary as HTML",
-                data=html.encode('utf-8'),
-                file_name=f"Weekly_Summary_{datetime.datetime.now().strftime('%Y%m%d')}.html",
-                mime="text/html",
-                use_container_width=True
-            )
-        else:
-            st.error(html)
-
-elif password:
-    st.error("❌ Incorrect password.")
-else:
-    st.info("Please enter the password to view the full report.")
+    b64 = base64.b64encode(html_report.encode()).decode()
+    href = f'<a href="data:text/html;base64,{b64}" download="weekly_summary.html">📥 Download Full Report as HTML</a>'
+    st.markdown(href, unsafe_allow_html=True)
