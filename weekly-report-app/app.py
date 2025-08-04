@@ -49,39 +49,41 @@ def load_data():
     df.columns = df.columns.str.strip()
 
     # Ensure 'Year Week' exists
-   if 'Year Week' in df.columns:
-    # Clean strings
-    df['Year Week'] = df['Year Week'].astype(str).str.strip()
+    if 'Year Week' in df.columns:
+        # Clean strings
+        df['Year Week'] = df['Year Week'].astype(str).str.strip()
 
-    # Keep only rows with a dash and 2 parts after split
-    valid_mask = df['Year Week'].str.contains('-', na=False)
-    
-    # Try splitting only valid rows
-    split_vals = df.loc[valid_mask, 'Year Week'].str.split('-', expand=True)
-    
-    # Check shape before assigning
-    if split_vals.shape[1] == 2:
-        df.loc[valid_mask, 'Year'] = split_vals[0].astype(int)
-        df.loc[valid_mask, 'Week'] = split_vals[1].astype(int)
-    else:
-        st.warning("Warning: 'Year Week' splitting did not produce two columns.")
+        # Mask for rows containing a dash
+        valid_mask = df['Year Week'].str.contains('-', na=False)
 
-    # Fill other Year/Week values as NA or 0 if you want
-    df['Year'] = df['Year'].fillna(0).astype(int)
-    df['Week'] = df['Week'].fillna(0).astype(int)
+        # Split only valid rows
+        split_vals = df.loc[valid_mask, 'Year Week'].str.split('-', expand=True)
 
-    df.drop(columns=['Year Week'], inplace=True)
+        # Assign Year and Week if split worked correctly
+        if split_vals.shape[1] == 2:
+            df.loc[valid_mask, 'Year'] = split_vals[0].astype(int)
+            df.loc[valid_mask, 'Week'] = split_vals[1].astype(int)
+        else:
+            st.warning("Warning: 'Year Week' splitting did not produce two columns.")
 
-    # Parse dates from 'Start'
+        # Fill missing Year/Week with 0 or NA as needed
+        df['Year'] = df['Year'].fillna(0).astype(int)
+        df['Week'] = df['Week'].fillna(0).astype(int)
+
+        # Drop original column
+        df.drop(columns=['Year Week'], inplace=True)
+
+    # Parse 'Start' dates into datetime
     df['Date'] = pd.to_datetime(df['Start'], errors='coerce')
 
-    # Overwrite Year and Week with ISO calendar values from Start date (more reliable)
+    # Overwrite Year and Week with ISO calendar from 'Date' column
     df['Week'] = df['Date'].dt.isocalendar().week
     df['Year'] = df['Date'].dt.isocalendar().year
 
     df['Week_Label'] = df['Year'].astype(str) + " Week " + df['Week'].astype(str)
 
     return df
+
     
     # Convert date columns and add useful columns
     df['Date'] = pd.to_datetime(df['Start'], errors='coerce')
