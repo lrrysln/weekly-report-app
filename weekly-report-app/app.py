@@ -163,6 +163,15 @@ if submitted and password_input == "1234":
     summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes Filtered']
     summary_df = df[summary_cols].drop_duplicates(subset=['Store Number']).reset_index(drop=True)
 
+    # ✅ Generate and display the HTML report
+    html_report = generate_weekly_summary(df, summary_df)
+    st.subheader("📄 Weekly Report (Preview)")
+    st.components.v1.html(html_report, height=1000, scrolling=True)
+
+    b64 = base64.b64encode(html_report.encode()).decode()
+    href = f'<a href="data:text/html;base64,{b64}" download="weekly_summary.html">📥 Download Full Report as HTML</a>'
+    st.markdown(href, unsafe_allow_html=True)
+
     # Custom Bar Colors
     def create_trend_figure(trend_counts):
         hex_colors = {
