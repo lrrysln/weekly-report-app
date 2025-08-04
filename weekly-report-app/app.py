@@ -126,8 +126,8 @@ def compute_trend(row):
 # Apply trend computation to the dataframe
 df['Trend'] = df.apply(compute_trend, axis=1)
 
-    # Calculate delta
-    def compute_delta(row):
+# Calculate delta
+def compute_delta(row):
         baseline_open = baseline_map.get(row['Store Number'])
         if pd.isna(row['Store Opening']) or pd.isna(baseline_open):
             return 0
