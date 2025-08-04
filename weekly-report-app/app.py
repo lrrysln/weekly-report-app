@@ -20,8 +20,6 @@ client = gspread.authorize(creds)
 SPREADSHEET_ID = "1cfr5rCRoRXuDJonarDbokznlaHHVpn1yUfTwo_ePL3w"
 WORKSHEET_NAME = "Sheet1"
 
-@st.cache_data(ttl=600)
-
 # ------------------- CONFIG -----------------------
 st.set_page_config(page_title="Construction Weekly Tracker", layout="wide")
 
