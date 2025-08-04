@@ -1,4 +1,3 @@
-V5.5.2 (working)
 import streamlit as st
 import pandas as pd
 import datetime
