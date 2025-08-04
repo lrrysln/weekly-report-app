@@ -33,25 +33,24 @@ if "authenticated" not in st.session_state:
 if st.session_state.get("password_entered") != True:
     password = st.text_input("Enter password:", type="password")
     if st.button("Submit"):
-        if password == "1234":
+        if password == PASSWORD:
             st.session_state["password_entered"] = True
             st.rerun()
         else:
             st.error("Incorrect password.")
-
     st.stop()
 
 # ------------------- LOAD AND CACHE DATA -----------------------
 @st.cache_data(ttl=3600)
 def load_data():
     sheet = client.open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET_NAME)
+    data = sheet.get_all_records()
+    df = pd.DataFrame(data)
     df['Date'] = pd.to_datetime(df['Start'], errors='coerce')
     df['Week'] = df['Date'].dt.isocalendar().week
     df['Year'] = df['Date'].dt.isocalendar().year
     df['Week_Label'] = df['Year'].astype(str) + " Week " + df['Week'].astype(str)
     return df
-
-df = load_data()
 
 # ------------------- DETERMINE CURRENT WEEK -----------------------
 today = datetime.date.today()
