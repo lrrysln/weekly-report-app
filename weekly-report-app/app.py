@@ -106,9 +106,24 @@ summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store
 summary_df = df[summary_cols].drop_duplicates(subset=['Store Number']).reset_index(drop=True)
 
 # Main Display
-st.subheader("📋 Submitted Reports Overview")
-st.markdown(f"<h4><span style='color:red;'><b>{len(df)}</b></span> form responses have been submitted</h4>", unsafe_allow_html=True)
-st.dataframe(df[['Store Number', 'Store Name', 'CPM', 'Prototype']], use_container_width=True)
+# --- Current Week Display (shown to all users) ---
+today = datetime.date.today()
+start_of_week = today - datetime.timedelta(days=today.weekday() + 1 if today.weekday() != 6 else 0)
+start_of_week = start_of_week if today.weekday() != 6 else today
+end_of_week = start_of_week + datetime.timedelta(days=6)
+
+current_week_number = start_of_week.isocalendar()[1]
+current_year = start_of_week.year
+week_label = f"{current_year} Week {current_week_number:02d}"
+
+current_week_df = df[(df['Date'] >= start_of_week) & (df['Date'] <= end_of_week)]
+
+st.markdown(
+    f"""### 📋 <span style='color:red'>{len(current_week_df)}</span> Submissions for the week of {start_of_week.strftime('%B %d')}–{end_of_week.strftime('%B %d')} (week {current_week_number} of the year), {current_year}""",
+    unsafe_allow_html=True
+)
+columns_to_show = ['Store Number', 'Store Name', 'CPM', 'Prototype', 'Week Label']
+st.dataframe(current_week_df[columns_to_show].reset_index(drop=True), 
 
 st.subheader("🔐 Generate Weekly Summary Report")
 password = st.text_input("Enter Password", type="password")
