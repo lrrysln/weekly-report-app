@@ -10,7 +10,7 @@ from streamlit.components.v1 import html
 st.set_page_config(page_title="Construction Weekly Tracker", layout="wide")
 
 # ------------------- PASSWORD PROTECTION -----------------------
-PASSWORD = "your_password_here"  # Replace with your password
+PASSWORD = "1234"
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
