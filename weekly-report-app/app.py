@@ -188,7 +188,7 @@ if submitted and password_input == "1234":
         buf.seek(0)
         return base64.b64encode(buf.read()).decode()
 
-   def generate_weekly_summary(df, summary_df):
+def generate_weekly_summary(df, summary_df):
     trend_order = ["pulled in", "pushed", "held", "baseline", "no baseline dates"]
     trend_counts = summary_df['Trend'].value_counts().reindex(trend_order, fill_value=0)
     fig = create_trend_figure(trend_counts)
