@@ -53,13 +53,13 @@ if 'Baseline' in df.columns:
 
 # --- Current Week Display (shown to all users) ---
 today = datetime.date.today()
-# Calculate start of week Sunday
 start_of_week = today - datetime.timedelta(days=today.weekday() + 1 if today.weekday() != 6 else 0)
 start_of_week = start_of_week if today.weekday() != 6 else today
 end_of_week = start_of_week + datetime.timedelta(days=6)
 
 current_week_number = start_of_week.isocalendar()[1]
 current_year = start_of_week.year
+week_label = f"{current_year} Week {current_week_number:02d}"
 
 current_week_df = df[(df['Date'] >= start_of_week) & (df['Date'] <= end_of_week)]
 
@@ -80,6 +80,7 @@ with st.form("password_form"):
 if submitted and password_input == "1234":
 
     st.markdown("## 🗓️ Weekly Submission Volume by Year")
+
     years = sorted(df['Year'].dropna().unique(), reverse=True)
     for year in years:
         with st.expander(f"📁 {year}"):
@@ -91,34 +92,41 @@ if submitted and password_input == "1234":
                 with st.expander(f"📆 {week} — {count} submission(s)"):
                     st.dataframe(year_data[year_data['Week Label'] == week].reset_index(drop=True))
 
-    # --- Detailed Weekly Summary Report ---
+   # --- Detailed Weekly Summary Report ---
 
-    # Create baseline map once
-    baseline_df = df[df['Baseline'] == "/True"].copy()
-    baseline_map = baseline_df.set_index('Store Number')['Store Opening'].to_dict()
+# First, strip spaces on Baseline column to be safe
+df['Baseline'] = df['Baseline'].astype(str).str.strip()
 
-    # Convert Store Opening to datetime
-    df['Store Opening'] = pd.to_datetime(df['Store Opening'], errors='coerce')
+# Filter baseline entries and convert their Store Opening to datetime BEFORE creating the mapping
+baseline_df = df[df['Baseline'] == "/True"].copy()
+baseline_df['Store Opening'] = pd.to_datetime(baseline_df['Store Opening'], errors='coerce')
 
-    # Trend calculation function
-    def compute_trend(row):
-        store_number = row['Store Number']
-        current_open = row['Store Opening']
-        if row['Baseline'] == "/True":
-            return "baseline"
-        baseline_open = baseline_map.get(store_number)
-        if pd.isna(current_open) or pd.isna(baseline_open):
-            return "no baseline dates"
-        if current_open > baseline_open:
-            return "pushed"
-        elif current_open < baseline_open:
-            return "pulled in"
-        else:
-            return "held"
+# Create mapping from Store Number to baseline Store Opening date (datetime)
+baseline_map = baseline_df.set_index('Store Number')['Store Opening'].to_dict()
 
-    df['Trend'] = df.apply(compute_trend, axis=1)
+# Convert entire df Store Opening column to datetime
+df['Store Opening'] = pd.to_datetime(df['Store Opening'], errors='coerce')
 
-    # Delta calculation function
+# Define trend calculation function with safe checks
+def compute_trend(row):
+    store_number = row['Store Number']
+    current_open = row['Store Opening']
+    if row['Baseline'] == "/True":
+        return "baseline"
+    baseline_open = baseline_map.get(store_number)
+    if pd.isna(current_open) or pd.isna(baseline_open):
+        return "no baseline dates"
+    if current_open > baseline_open:
+        return "pushed"
+    elif current_open < baseline_open:
+        return "pulled in"
+    else:
+        return "held"
+
+# Apply trend computation to the dataframe
+df['Trend'] = df.apply(compute_trend, axis=1)
+
+    # Calculate delta
     def compute_delta(row):
         baseline_open = baseline_map.get(row['Store Number'])
         if pd.isna(row['Store Opening']) or pd.isna(baseline_open):
@@ -127,7 +135,7 @@ if submitted and password_input == "1234":
 
     df['Store Opening Delta'] = df.apply(compute_delta, axis=1)
 
-    # Flagging significant delta
+    # Flag logic with red asterisk
     def flag_delta(delta):
         if isinstance(delta, int) and abs(delta) > 5:
             return '<span style="color:red;font-weight:bold;">*</span>'
@@ -135,15 +143,13 @@ if submitted and password_input == "1234":
 
     df['Flag'] = df['Store Opening Delta'].apply(flag_delta)
 
-    # Notes keyword filtering
-    keywords = [
-        "behind schedule", "lagging", "delay", "critical path", "cpm impact", "work on hold", "stop work order",
-        "reschedule", "off track", "schedule drifting", "missed milestone", "budget overrun", "cost impact",
-        "change order pending", "claim submitted", "dispute", "litigation risk", "schedule variance",
-        "material escalation", "labor shortage", "equipment shortage", "low productivity", "rework required",
-        "defects found", "qc failure", "weather delays", "permit delays", "regulatory hurdles",
-        "site access issues", "awaiting sign-off", "conflict", "identified risk", "mitigation", "forecast revised"
-    ]
+    # Filter notes for keywords
+    keywords = ["behind schedule", "lagging", "delay", "critical path", "cpm impact", "work on hold", "stop work order",
+                "reschedule", "off track", "schedule drifting", "missed milestone", "budget overrun", "cost impact",
+                "change order pending", "claim submitted", "dispute", "litigation risk", "schedule variance",
+                "material escalation", "labor shortage", "equipment shortage", "low productivity", "rework required",
+                "defects found", "qc failure", "weather delays", "permit delays", "regulatory hurdles",
+                "site access issues", "awaiting sign-off", "conflict", "identified risk", "mitigation", "forecast revised"]
 
     def check_notes(text):
         text_lower = str(text).lower()
@@ -155,7 +161,7 @@ if submitted and password_input == "1234":
     summary_cols = ['Store Name', 'Store Number', 'Prototype', 'CPM', 'Flag', 'Store Opening Delta', 'Trend', 'Notes Filtered']
     summary_df = df[summary_cols].drop_duplicates(subset=['Store Number']).reset_index(drop=True)
 
-    # Plot function
+    # Custom Bar Colors
     def create_trend_figure(trend_counts):
         hex_colors = {
             "held": "#FDC01A",
@@ -165,8 +171,8 @@ if submitted and password_input == "1234":
             "no baseline dates": "#999999"
         }
         fig, ax = plt.subplots(figsize=(10, 5))
-        ax.bar(trend_counts.index, trend_counts.values,
-               color=[hex_colors.get(x, "#999") for x in trend_counts.index])
+        bars = ax.bar(trend_counts.index, trend_counts.values,
+                      color=[hex_colors.get(x, "#999") for x in trend_counts.index])
         ax.set_ylabel("Count")
         ax.set_xlabel("Trend")
         ax.set_title("📊 Store Opening Trend Breakdown")
@@ -256,8 +262,12 @@ if submitted and password_input == "1234":
             mime="text/html",
             use_container_width=True
         )
-
-elif submitted:
-    st.error("❌ Incorrect password.")
 else:
-    st.info("Please enter the password and click Submit to view the full report.")
+    if submitted:
+        st.error("❌ Incorrect password.")
+    else:
+        st.info("Please enter the password and click Submit to view the full report.")
+
+
+
+
