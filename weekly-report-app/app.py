@@ -17,7 +17,7 @@ if "authenticated" not in st.session_state:
 if st.session_state.get("password_entered") != True:
     password = st.text_input("Enter password:", type="password")
     if st.button("Submit"):
-        if password == "yourpassword":
+        if password == "1234":
             st.session_state["password_entered"] = True
             st.experimental_rerun()  # <-- valid here
         else:
