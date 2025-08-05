@@ -85,7 +85,7 @@ if not st.session_state.authenticated:
             st.error("❌ Incorrect password.")
     st.stop()
 
-st.markdown("## 🗓Weekly Submission Volume by Year")
+st.markdown("## Weekly Submission Volume by Year")
 years = sorted(df['Year'].dropna().unique(), reverse=True)
 for year in years:
     with st.expander(f"📁 {year}"):
