@@ -17,7 +17,7 @@ from google.auth.transport.requests import Request
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 CREDENTIALS_FILE = 'credentials.json'  # Your OAuth 2.0 credentials file
 TOKEN_PICKLE = 'token.pickle'
-DRIVE_FOLDER_ID = 'YOUR_GOOGLE_DRIVE_FOLDER_ID'  # Replace with your folder ID
+DRIVE_FOLDER_ID = 'Scheduling' 
 
 @st.cache_resource
 def authenticate_google_drive():
@@ -40,13 +40,16 @@ def authenticate_google_drive():
 
 def upload_csv_to_drive(csv_path, file_name, folder_id=None):
     service = authenticate_google_drive()
+
+    # Get folder ID by name if not provided
+    if not folder_id:
+        folder_id = get_drive_folder_id(service, DRIVE_FOLDER_NAME)
+
     file_metadata = {
         'name': file_name,
         'mimeType': 'text/csv',
+        'parents': [folder_id]
     }
-
-    if folder_id:
-        file_metadata['parents'] = [folder_id]
 
     media = MediaFileUpload(csv_path, mimetype='text/csv')
     file = service.files().create(
@@ -119,3 +122,4 @@ if uploaded_file:
         st.warning("⚠️ No structured activity data found in the PDF.")
 else:
     st.info("👆 Upload a PDF file to get started.")
+
