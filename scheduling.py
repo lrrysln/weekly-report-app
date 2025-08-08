@@ -166,8 +166,16 @@ if uploaded_files:
         df = pd.DataFrame(all_data)
 
         # Convert date columns
-        df["Start Date"] = pd.to_datetime(df["Start Date"], format="%d-%m-%y")
-        df["Finish Date"] = pd.to_datetime(df["Finish Date"], format="%d-%m-%y")
+        df["Start Date"] = pd.to_datetime(df["Start Date"], format="%m-%d-%y", errors="coerce")
+        df["Finish Date"] = pd.to_datetime(df["Finish Date"], format="%m-%d-%y", errors="coerce")
+
+        invalid_dates = df[df["Start Date"].isna() | df["Finish Date"].isna()]
+        if not invalid_dates.empty:
+            st.warning(f"⚠️ Found {len(invalid_dates)} rows with invalid date format:")
+            st.dataframe(invalid_dates)
+
+        # Optionally drop those rows so they don’t break downstream logic
+        df = df.dropna(subset=["Start Date", "Finish Date"])
 
         # Simulate % complete
         np.random.seed(42)
@@ -256,3 +264,4 @@ if uploaded_files:
         st.warning("⚠️ No valid activity data found.")
 else:
     st.info("📂 Upload one or more PDF files to begin.")
+
