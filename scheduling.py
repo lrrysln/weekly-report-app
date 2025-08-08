@@ -15,9 +15,9 @@ from google.auth.transport.requests import Request
 # ======================
 
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
-CREDENTIALS_FILE = 'credentials.json'  # Your OAuth 2.0 credentials file
+CREDENTIALS_FILE = 'credentials.json'
 TOKEN_PICKLE = 'token.pickle'
-DRIVE_FOLDER_ID = 'YOUR_GOOGLE_DRIVE_FOLDER_ID'  # Replace with your actual folder ID
+DRIVE_FOLDER_ID = 'YOUR_GOOGLE_DRIVE_FOLDER_ID'  # Replace this
 
 @st.cache_resource
 def authenticate_google_drive():
@@ -84,7 +84,7 @@ if uploaded_files:
                 if page_text:
                     all_text += page_text + "\n"
 
-        # Regex pattern to match lines
+        # Regex pattern
         pattern = re.compile(r"^(\S+)\s+(.+?)\s+(\d+)\s+(\d{2}-\d{2}-\d{2})\s+(\d{2}-\d{2}-\d{2})\s+(\d+)\s+(.*)$")
         skipped_lines = []
 
@@ -107,46 +107,70 @@ if uploaded_files:
                 skipped_lines.append({"PDF": uploaded_file.name, "Line": line})
 
         if skipped_lines:
-            st.warning(f"⚠️ Skipped {len(skipped_lines)} line(s) in `{uploaded_file.name}` due to format issues.")
             total_skipped.extend(skipped_lines)
-            with st.expander(f"🔍 View Skipped Lines for `{uploaded_file.name}`"):
-                for item in skipped_lines:
-                    st.text(item["Line"])
 
     # After processing all PDFs
     if all_data:
         df = pd.DataFrame(all_data)
         st.success(f"✅ Extracted {len(df)} valid activities from {len(uploaded_files)} file(s).")
-        st.dataframe(df, use_container_width=True)
 
         # ===========================
+        # 🏠 Homepage Button Toggles
         # ===========================
-        # 🔁 Compare Repeated Activities
+        show_data = st.button("📋 View Extracted Data Table")
+        show_repeats = st.button("🔁 View Repeated Activities Table")
+        show_status = st.button("📤 View Upload Summary")
+
+        if show_data:
+            with st.expander("📋 Extracted Data Table"):
+                st.dataframe(df, use_container_width=True)
+
         # ===========================
+        # 🔁 Compare Repeated Activities by Phase
+        # ===========================
+        def categorize_activity(name):
+            name = name.lower()
+            if any(word in name for word in ["clear", "grade", "trench", "backfill", "earthwork", "site"]):
+                return "🏗 Site Work & Earthwork"
+            elif any(word in name for word in ["foundation", "slab", "footing", "structural"]):
+                return "🧱 Foundation & Structural"
+            elif any(word in name for word in ["tank", "dispenser", "piping", "fuel", "gas"]):
+                return "⚙️ Fuel System Installation"
+            elif any(word in name for word in ["building", "framing", "roof", "wall", "interior"]):
+                return "🛠️ Building Construction"
+            elif any(word in name for word in ["landscape", "sidewalk", "curb", "paving", "striping"]):
+                return "🌿 Landscaping & Finishing"
+            elif any(word in name for word in ["inspection", "punchlist", "handover", "final"]):
+                return "📋 Final Inspection & Handover"
+            else:
+                return "❓ Uncategorized"
+
         dup_ids = df["Activity ID"][df["Activity ID"].duplicated(keep=False)]
         repeated_df = df[df["Activity ID"].isin(dup_ids)]
 
-        if not repeated_df.empty:
-            st.subheader("📊 Repeated Activities Comparison")
+        if not repeated_df.empty and show_repeats:
+            st.subheader("🔁 Repeated Activities Comparison by Construction Phase")
 
-            # Sort for cleaner grouping
-            repeated_df = repeated_df.sort_values(by=["Activity ID", "Project Code", "Start Date"])
+            repeated_df["Phase"] = repeated_df["Activity Name"].apply(categorize_activity)
+            repeated_df = repeated_df.sort_values(by=["Phase", "Activity ID", "Project Code", "Start Date"])
+            phase_grouped = repeated_df.groupby(["Phase", "Activity ID", "Activity Name"])
 
-            # Group by Activity ID + Name
-            grouped = repeated_df.groupby(["Activity ID", "Activity Name"])
+            current_phase = None
+            for (phase, act_id, act_name), group in phase_grouped:
+                if current_phase != phase:
+                    st.markdown(f"### {phase}")
+                    current_phase = phase
 
-            for (act_id, act_name), group in grouped:
                 with st.expander(f"🔁 {act_id} — {act_name}"):
                     display_df = group[[
                         "Project Code", "Project Name", "Duration",
                         "Start Date", "Finish Date", "Float", "Notes"
                     ]].reset_index(drop=True)
                     st.dataframe(display_df, use_container_width=True)
-        else:
+        elif show_repeats:
             st.info("✅ No repeated activities found across files.")
 
-
-        # Save to CSV
+        # Save combined CSV
         with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp_csv:
             df.to_csv(tmp_csv.name, index=False)
             csv_path = tmp_csv.name
@@ -160,19 +184,22 @@ if uploaded_files:
             except Exception as e:
                 st.error(f"❌ Upload failed: {str(e)}")
 
-        # Optional: Download skipped lines
-        if total_skipped:
-            skipped_df = pd.DataFrame(total_skipped)
-            skipped_csv_path = os.path.join(tempfile.gettempdir(), "skipped_lines.csv")
-            skipped_df.to_csv(skipped_csv_path, index=False)
-            st.download_button(
-                "⬇️ Download Skipped Lines CSV",
-                data=open(skipped_csv_path, "rb"),
-                file_name="skipped_lines.csv",
-                mime="text/csv"
-            )
+        # ======================
+        # 📤 Upload Summary Section
+        # ======================
+        if total_skipped and show_status:
+            with st.expander("📤 Upload Summary (Skipped Lines)"):
+                st.warning(f"⚠️ Skipped {len(total_skipped)} line(s) due to format issues.")
+                skipped_df = pd.DataFrame(total_skipped)
+                skipped_csv_path = os.path.join(tempfile.gettempdir(), "skipped_lines.csv")
+                skipped_df.to_csv(skipped_csv_path, index=False)
+                st.download_button(
+                    "⬇️ Download Skipped Lines CSV",
+                    data=open(skipped_csv_path, "rb"),
+                    file_name="skipped_lines.csv",
+                    mime="text/csv"
+                )
     else:
         st.warning("⚠️ No valid activity data found in any of the uploaded PDFs.")
 else:
     st.info("📂 Upload one or more PDF files to begin.")
-
