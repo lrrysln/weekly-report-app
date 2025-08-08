@@ -120,6 +120,7 @@ if uploaded_files:
         st.dataframe(df, use_container_width=True)
 
         # ===========================
+        # ===========================
         # 🔁 Compare Repeated Activities
         # ===========================
         dup_ids = df["Activity ID"][df["Activity ID"].duplicated(keep=False)]
@@ -128,26 +129,22 @@ if uploaded_files:
         if not repeated_df.empty:
             st.subheader("📊 Repeated Activities Comparison")
 
-            comparison_df = repeated_df.pivot_table(
-                index=["Activity ID", "Activity Name"],
-                columns=["Project Code", "Project Name"],
-                values=["Duration", "Start Date", "Finish Date", "Float"],
-                aggfunc="first"
-            )
+            # Sort for cleaner grouping
+            repeated_df = repeated_df.sort_values(by=["Activity ID", "Project Code", "Start Date"])
 
-            # ✅ Final corrected flattening code for 3-level MultiIndex
-            if isinstance(comparison_df.columns, pd.MultiIndex):
-                comparison_df.columns = [
-                    f"{val} ({proj_code} - {proj_name})"
-                    for val, proj_code, proj_name in comparison_df.columns
-                ]
-            else:
-                comparison_df.columns = [str(col) for col in comparison_df.columns]
+            # Group by Activity ID + Name
+            grouped = repeated_df.groupby(["Activity ID", "Activity Name"])
 
-            comparison_df = comparison_df.reset_index()
-            st.dataframe(comparison_df, use_container_width=True)
+            for (act_id, act_name), group in grouped:
+                with st.expander(f"🔁 {act_id} — {act_name}"):
+                    display_df = group[[
+                        "Project Code", "Project Name", "Duration",
+                        "Start Date", "Finish Date", "Float", "Notes"
+                    ]].reset_index(drop=True)
+                    st.dataframe(display_df, use_container_width=True)
         else:
             st.info("✅ No repeated activities found across files.")
+
 
         # Save to CSV
         with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp_csv:
@@ -178,3 +175,4 @@ if uploaded_files:
         st.warning("⚠️ No valid activity data found in any of the uploaded PDFs.")
 else:
     st.info("📂 Upload one or more PDF files to begin.")
+
