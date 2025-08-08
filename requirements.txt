@@ -1,6 +1,9 @@
 streamlit
-pdfplumber
 pandas
+pdfplumber
+reportlab
+altair
+altair_saver
 google-api-python-client
-google-auth
+google-auth-httplib2
 google-auth-oauthlib
