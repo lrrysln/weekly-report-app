@@ -135,11 +135,15 @@ if uploaded_files:
                 aggfunc="first"
             )
 
-            # Flatten columns if MultiIndex
-            if isinstance(comparison_df.columns, pd.MultiIndex):
-                comparison_df.columns = [f"{val} ({proj})" for val, proj in comparison_df.columns]
-            else:
-                comparison_df.columns = [str(col) for col in comparison_df.columns]
+# Flatten columns if MultiIndex (safe for 1 or many projects)
+if isinstance(comparison_df.columns, pd.MultiIndex):
+    comparison_df.columns = [
+        f"{val} ({proj_code} - {proj_name})" 
+        for val, (proj_code, proj_name) in comparison_df.columns
+    ]
+else:
+    comparison_df.columns = [str(col) for col in comparison_df.columns]
+
 
             comparison_df = comparison_df.reset_index()
             st.dataframe(comparison_df, use_container_width=True)
@@ -175,5 +179,6 @@ if uploaded_files:
         st.warning("⚠️ No valid activity data found in any of the uploaded PDFs.")
 else:
     st.info("📂 Upload one or more PDF files to begin.")
+
 
 
