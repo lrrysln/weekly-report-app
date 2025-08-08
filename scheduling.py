@@ -1,98 +1,218 @@
-# After processing all PDFs and building the dataframe:
-df = pd.DataFrame(all_data)
+import streamlit as st
+import pdfplumber
+import pandas as pd
+import re
+import os
+import tempfile
+import pickle
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
 
-st.success(f"✅ Extracted {len(df)} valid activities from {len(uploaded_files)} file(s).")
+# ======================
+# Google Drive Setup
+# ======================
 
-# Buttons to toggle views
-show_data = st.button("📋 View Extracted Data Table")
-show_repeats = st.button("🔁 View Repeated Activities Table")
-show_status = st.button("📤 View Upload Summary")
+SCOPES = ['https://www.googleapis.com/auth/drive.file']
+CREDENTIALS_FILE = 'credentials.json'
+TOKEN_PICKLE = 'token.pickle'
+DRIVE_FOLDER_ID = 'YOUR_GOOGLE_DRIVE_FOLDER_ID'  # Replace with your actual folder ID
 
-# ===========================
-# 📋 Extracted Data Table
-# ===========================
-if show_data:
-    with st.expander("📋 Extracted Data Table"):
-        st.dataframe(df, use_container_width=True)
+@st.cache_resource
+def authenticate_google_drive():
+    creds = None
+    if os.path.exists(TOKEN_PICKLE):
+        with open(TOKEN_PICKLE, 'rb') as token:
+            creds = pickle.load(token)
 
-# ===========================
-# 🔁 Categorize and Compare Repeated Activities
-# ===========================
-def categorize_activity(name):
-    name = name.lower()
-    if any(word in name for word in ["clear", "grade", "trench", "backfill", "earthwork", "site"]):
-        return "🏗 Site Work & Earthwork"
-    elif any(word in name for word in ["foundation", "slab", "footing", "structural"]):
-        return "🧱 Foundation & Structural"
-    elif any(word in name for word in ["tank", "dispenser", "piping", "fuel", "gas"]):
-        return "⚙️ Fuel System Installation"
-    elif any(word in name for word in ["building", "framing", "roof", "wall", "interior"]):
-        return "🛠️ Building Construction"
-    elif any(word in name for word in ["landscape", "sidewalk", "curb", "paving", "striping"]):
-        return "🌿 Landscaping & Finishing"
-    elif any(word in name for word in ["inspection", "punchlist", "handover", "final"]):
-        return "📋 Final Inspection & Handover"
-    else:
-        return "❓ Uncategorized"
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open(TOKEN_PICKLE, 'wb') as token:
+            pickle.dump(creds, token)
 
-dup_ids = df["Activity ID"][df["Activity ID"].duplicated(keep=False)]
-repeated_df = df[df["Activity ID"].isin(dup_ids)]
+    return build('drive', 'v3', credentials=creds)
 
-if not repeated_df.empty and show_repeats:
-    st.subheader("🔁 Repeated Activities Comparison by Construction Phase")
+def upload_csv_to_drive(csv_path, file_name, folder_id=None):
+    service = authenticate_google_drive()
+    file_metadata = {
+        'name': file_name,
+        'mimeType': 'text/csv',
+    }
+    if folder_id:
+        file_metadata['parents'] = [folder_id]
 
-    # Add a 'Phase' column
-    repeated_df["Phase"] = repeated_df["Activity Name"].apply(categorize_activity)
+    media = MediaFileUpload(csv_path, mimetype='text/csv')
+    file = service.files().create(
+        body=file_metadata,
+        media_body=media,
+        fields='id'
+    ).execute()
+    return file.get('id')
 
-    # Sort for grouping
-    repeated_df = repeated_df.sort_values(by=["Phase", "Activity ID", "Project Code", "Start Date"])
+# ======================
+# Streamlit App
+# ======================
 
-    # Group by Phase, then Activity ID & Name
-    phase_grouped = repeated_df.groupby(["Phase", "Activity ID", "Activity Name"])
+st.set_page_config(page_title="Multi-PDF Activity Extractor", layout="wide")
+st.title("📄 Multi-PDF Activity Extractor & Google Drive Uploader")
 
-    current_phase = None
-    for (phase, act_id, act_name), group in phase_grouped:
-        if current_phase != phase:
-            st.markdown(f"### {phase}")
-            current_phase = phase
+uploaded_files = st.file_uploader("Upload one or more PDF files", type="pdf", accept_multiple_files=True)
 
-        with st.expander(f"🔁 {act_id} — {act_name}"):
-            display_df = group[[
-                "Project Code", "Project Name", "Duration",
-                "Start Date", "Finish Date", "Float", "Notes"
-            ]].reset_index(drop=True)
-            st.dataframe(display_df, use_container_width=True)
-elif show_repeats:
-    st.info("✅ No repeated activities found across files.")
+if uploaded_files:
+    all_data = []
+    total_skipped = []
 
-# ===========================
-# 📤 Upload Summary (Skipped Lines)
-# ===========================
-if total_skipped and show_status:
-    with st.expander("📤 Upload Summary (Skipped Lines)"):
-        st.warning(f"⚠️ Skipped {len(total_skipped)} line(s) due to format issues.")
-        skipped_df = pd.DataFrame(total_skipped)
-        skipped_csv_path = os.path.join(tempfile.gettempdir(), "skipped_lines.csv")
-        skipped_df.to_csv(skipped_csv_path, index=False)
-        st.download_button(
-            "⬇️ Download Skipped Lines CSV",
-            data=open(skipped_csv_path, "rb"),
-            file_name="skipped_lines.csv",
-            mime="text/csv"
+    for uploaded_file in uploaded_files:
+        pdf_name = os.path.splitext(uploaded_file.name)[0]
+        st.info(f"📄 Processing: `{uploaded_file.name}`")
+
+        # Extract project metadata from filename (assumes format: "CODE - Project Name.pdf")
+        title_parts = pdf_name.split(" - ")
+        project_code = title_parts[0].strip() if len(title_parts) > 0 else "Unknown"
+        project_name = title_parts[1].strip().title() if len(title_parts) > 1 else "Unknown Project"
+
+        # Extract text from PDF
+        all_text = ""
+        with pdfplumber.open(uploaded_file) as pdf:
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    all_text += page_text + "\n"
+
+        # Regex pattern for each activity line
+        pattern = re.compile(
+            r"^(\S+)\s+(.+?)\s+(\d+)\s+(\d{2}-\d{2}-\d{2})\s+(\d{2}-\d{2}-\d{2})\s+(\d+)\s+(.*)$"
         )
+        skipped_lines = []
 
-# ===========================
-# Upload CSV Button (unchanged)
-# ===========================
-with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp_csv:
-    df.to_csv(tmp_csv.name, index=False)
-    csv_path = tmp_csv.name
+        for line in all_text.strip().split('\n'):
+            line = line.strip()
+            match = pattern.match(line)
+            if match:
+                all_data.append({
+                    "Project Code": project_code,
+                    "Project Name": project_name,
+                    "Activity ID": match.group(1),
+                    "Activity Name": match.group(2),
+                    "Duration": int(match.group(3)),
+                    "Start Date": match.group(4),
+                    "Finish Date": match.group(5),
+                    "Float": int(match.group(6)),
+                    "Notes": match.group(7)
+                })
+            else:
+                skipped_lines.append({"PDF": uploaded_file.name, "Line": line})
 
-csv_filename = "combined_activity_data.csv"
+        if skipped_lines:
+            total_skipped.extend(skipped_lines)
 
-if st.button("📤 Upload Combined Table to Google Drive"):
-    try:
-        file_id = upload_csv_to_drive(csv_path, csv_filename, folder_id=DRIVE_FOLDER_ID)
-        st.success(f"✅ Uploaded! [View File](https://drive.google.com/file/d/{file_id})")
-    except Exception as e:
-        st.error(f"❌ Upload failed: {str(e)}")
+    # After processing all PDFs
+    if all_data:
+        df = pd.DataFrame(all_data)
+        st.success(f"✅ Extracted {len(df)} valid activities from {len(uploaded_files)} file(s).")
+
+        # ===========================
+        # Buttons to toggle views
+        # ===========================
+        show_data = st.button("📋 View Extracted Data Table")
+        show_repeats = st.button("🔁 View Repeated Activities Table")
+        show_status = st.button("📤 View Upload Summary")
+
+        # ===========================
+        # 📋 Extracted Data Table
+        # ===========================
+        if show_data:
+            with st.expander("📋 Extracted Data Table"):
+                st.dataframe(df, use_container_width=True)
+
+        # ===========================
+        # 🔁 Categorize and Compare Repeated Activities
+        # ===========================
+        def categorize_activity(name):
+            name = name.lower()
+            if any(word in name for word in ["clear", "grade", "trench", "backfill", "earthwork", "site"]):
+                return "🏗 Site Work & Earthwork"
+            elif any(word in name for word in ["foundation", "slab", "footing", "structural"]):
+                return "🧱 Foundation & Structural"
+            elif any(word in name for word in ["tank", "dispenser", "piping", "fuel", "gas"]):
+                return "⚙️ Fuel System Installation"
+            elif any(word in name for word in ["building", "framing", "roof", "wall", "interior"]):
+                return "🛠️ Building Construction"
+            elif any(word in name for word in ["landscape", "sidewalk", "curb", "paving", "striping"]):
+                return "🌿 Landscaping & Finishing"
+            elif any(word in name for word in ["inspection", "punchlist", "handover", "final"]):
+                return "📋 Final Inspection & Handover"
+            else:
+                return "❓ Uncategorized"
+
+        dup_ids = df["Activity ID"][df["Activity ID"].duplicated(keep=False)]
+        repeated_df = df[df["Activity ID"].isin(dup_ids)]
+
+        if not repeated_df.empty and show_repeats:
+            st.subheader("🔁 Repeated Activities Comparison by Construction Phase")
+
+            # Add a 'Phase' column
+            repeated_df["Phase"] = repeated_df["Activity Name"].apply(categorize_activity)
+
+            # Sort for grouping
+            repeated_df = repeated_df.sort_values(by=["Phase", "Activity ID", "Project Code", "Start Date"])
+
+            # Group by Phase, then Activity ID & Name
+            phase_grouped = repeated_df.groupby(["Phase", "Activity ID", "Activity Name"])
+
+            current_phase = None
+            for (phase, act_id, act_name), group in phase_grouped:
+                if current_phase != phase:
+                    st.markdown(f"### {phase}")
+                    current_phase = phase
+
+                with st.expander(f"🔁 {act_id} — {act_name}"):
+                    display_df = group[[
+                        "Project Code", "Project Name", "Duration",
+                        "Start Date", "Finish Date", "Float", "Notes"
+                    ]].reset_index(drop=True)
+                    st.dataframe(display_df, use_container_width=True)
+        elif show_repeats:
+            st.info("✅ No repeated activities found across files.")
+
+        # ===========================
+        # 📤 Upload Summary (Skipped Lines)
+        # ===========================
+        if total_skipped and show_status:
+            with st.expander("📤 Upload Summary (Skipped Lines)"):
+                st.warning(f"⚠️ Skipped {len(total_skipped)} line(s) due to format issues.")
+                skipped_df = pd.DataFrame(total_skipped)
+                skipped_csv_path = os.path.join(tempfile.gettempdir(), "skipped_lines.csv")
+                skipped_df.to_csv(skipped_csv_path, index=False)
+                st.download_button(
+                    "⬇️ Download Skipped Lines CSV",
+                    data=open(skipped_csv_path, "rb"),
+                    file_name="skipped_lines.csv",
+                    mime="text/csv"
+                )
+
+        # ===========================
+        # Upload CSV Button
+        # ===========================
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp_csv:
+            df.to_csv(tmp_csv.name, index=False)
+            csv_path = tmp_csv.name
+
+        csv_filename = "combined_activity_data.csv"
+
+        if st.button("📤 Upload Combined Table to Google Drive"):
+            try:
+                file_id = upload_csv_to_drive(csv_path, csv_filename, folder_id=DRIVE_FOLDER_ID)
+                st.success(f"✅ Uploaded! [View File](https://drive.google.com/file/d/{file_id})")
+            except Exception as e:
+                st.error(f"❌ Upload failed: {str(e)}")
+
+    else:
+        st.warning("⚠️ No valid activity data found in any of the uploaded PDFs.")
+else:
+    st.info("📂 Upload one or more PDF files to begin.")
