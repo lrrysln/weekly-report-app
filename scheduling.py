@@ -119,6 +119,31 @@ if uploaded_files:
         st.success(f"✅ Extracted {len(df)} valid activities from {len(uploaded_files)} file(s).")
         st.dataframe(df, use_container_width=True)
 
+        # ===========================
+        # 🔁 Compare Repeated Activities
+        # ===========================
+        dup_ids = df["Activity ID"][df["Activity ID"].duplicated(keep=False)]
+        repeated_df = df[df["Activity ID"].isin(dup_ids)]
+
+        if not repeated_df.empty:
+            st.subheader("📊 Repeated Activities Comparison")
+
+            # Build pivot-style comparison
+            comparison_df = repeated_df.pivot_table(
+                index=["Activity ID", "Activity Name"],
+                columns=["Project Code", "Project Name"],
+                values=["Duration", "Start Date", "Finish Date", "Float"],
+                aggfunc="first"
+            )
+
+            # Flatten MultiIndex columns
+            comparison_df.columns = [f"{val} ({proj})" for val, proj in comparison_df.columns]
+            comparison_df = comparison_df.reset_index()
+
+            st.dataframe(comparison_df, use_container_width=True)
+        else:
+            st.info("✅ No repeated activities found across files.")
+        
         # Save to CSV
         with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp_csv:
             df.to_csv(tmp_csv.name, index=False)
@@ -148,3 +173,4 @@ if uploaded_files:
         st.warning("⚠️ No valid activity data found in any of the uploaded PDFs.")
 else:
     st.info("📂 Upload one or more PDF files to begin.")
+
