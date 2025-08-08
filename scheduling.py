@@ -218,8 +218,9 @@ if uploaded_files:
             st.altair_chart(gantt_chart, use_container_width=True)
             
             # Save Gantt chart
-            gantt_path = os.path.join(tempfile.gettempdir(), "gantt_chart.png")
-            altair_save(gantt_chart, gantt_path, method="kaleido")
+            # Save as HTML
+            gantt_path = os.path.join(tempfile.gettempdir(), "gantt_chart.html")
+            gantt_chart.save(gantt_path)
 
         # 🚨 Critical Tasks
         st.subheader("🚨 Critical Tasks with Zero or Low Float")
@@ -266,5 +267,6 @@ if uploaded_files:
         st.warning("⚠️ No valid activity data found.")
 else:
     st.info("📂 Upload one or more PDF files to begin.")
+
 
 
