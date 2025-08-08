@@ -15,6 +15,8 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 import altair as alt
 from altair_saver import save as altair_save
+import altair as alt
+from altair_saver import save as altair_save
 
 # ======================
 # Google Drive Setup
@@ -214,10 +216,10 @@ if uploaded_files:
                 title=f"Gantt Chart for {selected_project}"
             )
             st.altair_chart(gantt_chart, use_container_width=True)
-
+            
             # Save Gantt chart
             gantt_path = os.path.join(tempfile.gettempdir(), "gantt_chart.png")
-            altair_save(gantt_chart, gantt_path)
+            altair_save(gantt_chart, gantt_path, method="kaleido")
 
         # 🚨 Critical Tasks
         st.subheader("🚨 Critical Tasks with Zero or Low Float")
@@ -264,4 +266,5 @@ if uploaded_files:
         st.warning("⚠️ No valid activity data found.")
 else:
     st.info("📂 Upload one or more PDF files to begin.")
+
 
