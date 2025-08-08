@@ -17,7 +17,7 @@ from google.auth.transport.requests import Request
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 CREDENTIALS_FILE = 'credentials.json'  # Your OAuth 2.0 credentials file
 TOKEN_PICKLE = 'token.pickle'
-DRIVE_FOLDER_ID = 'YOUR_GOOGLE_DRIVE_FOLDER_ID'  # Replace with your folder ID
+DRIVE_FOLDER_ID = 'YOUR_GOOGLE_DRIVE_FOLDER_ID'  # Replace this with your folder ID
 
 @st.cache_resource
 def authenticate_google_drive():
@@ -32,7 +32,6 @@ def authenticate_google_drive():
         else:
             flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
             creds = flow.run_local_server(port=0)
-
         with open(TOKEN_PICKLE, 'wb') as token:
             pickle.dump(creds, token)
 
@@ -44,7 +43,6 @@ def upload_csv_to_drive(csv_path, file_name, folder_id=None):
         'name': file_name,
         'mimeType': 'text/csv',
     }
-
     if folder_id:
         file_metadata['parents'] = [folder_id]
 
@@ -54,68 +52,77 @@ def upload_csv_to_drive(csv_path, file_name, folder_id=None):
         media_body=media,
         fields='id'
     ).execute()
-
     return file.get('id')
+
 
 # ======================
 # Streamlit App
 # ======================
 
-st.set_page_config(page_title="PDF Data Extractor", layout="wide")
-st.title("📄 PDF Activity Data Extractor & Uploader")
+st.set_page_config(page_title="Multi-PDF Activity Extractor", layout="wide")
+st.title("📄 Multi-PDF Activity Extractor & Google Drive Uploader")
 
-uploaded_file = st.file_uploader("Upload a PDF", type="pdf")
+uploaded_files = st.file_uploader("Upload one or more PDF files", type="pdf", accept_multiple_files=True)
 
-if uploaded_file:
-    pdf_name = os.path.splitext(uploaded_file.name)[0]
-    st.info(f"📄 Uploaded: {uploaded_file.name}")
+if uploaded_files:
+    all_data = []
 
-    # Extract text from uploaded PDF
-    all_text = ""
-    with pdfplumber.open(uploaded_file) as pdf:
-        for page in pdf.pages:
-            page_text = page.extract_text()
-            if page_text:
-                all_text += page_text + "\n"
+    for uploaded_file in uploaded_files:
+        pdf_name = os.path.splitext(uploaded_file.name)[0]
+        st.info(f"Processing: `{uploaded_file.name}`")
 
-    # Regex to extract structured data
-    pattern = re.compile(r"(\S+)\s+(.+?)\s+(\d+)\s+(\d{2}-\d{2}-\d{2})\s+(\d{2}-\d{2}-\d{2})\s+(\d+)\s+(.*)")
+        # --- Extract project metadata ---
+        title_parts = pdf_name.split(" - ")
+        project_code = title_parts[0].strip() if len(title_parts) > 0 else "Unknown"
+        project_name = title_parts[1].strip().title() if len(title_parts) > 1 else "Unknown Project"
 
-    rows = []
-    for line in all_text.strip().split('\n'):
-        match = pattern.match(line)
-        if match:
-            rows.append({
-                "Activity ID": match.group(1),
-                "Activity Name": match.group(2),
-                "Duration": int(match.group(3)),
-                "Start Date": match.group(4),
-                "Finish Date": match.group(5),
-                "Float": int(match.group(6)),
-                "Notes": match.group(7)
-            })
+        # Extract text
+        all_text = ""
+        with pdfplumber.open(uploaded_file) as pdf:
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    all_text += page_text + "\n"
 
-    if rows:
-        df = pd.DataFrame(rows)
+        # Regex pattern
+        pattern = re.compile(r"(\S+)\s+(.+?)\s+(\d+)\s+(\d{2}-\d{2}-\d{2})\s+(\d{2}-\d{2}-\d{2})\s+(\d+)\s+(.*)")
 
-        st.success(f"✅ Extracted {len(df)} activities.")
+        for line in all_text.strip().split('\n'):
+            match = pattern.match(line)
+            if match:
+                all_data.append({
+                    "Project Code": project_code,
+                    "Project Name": project_name,
+                    "Activity ID": match.group(1),
+                    "Activity Name": match.group(2),
+                    "Duration": int(match.group(3)),
+                    "Start Date": match.group(4),
+                    "Finish Date": match.group(5),
+                    "Float": int(match.group(6)),
+                    "Notes": match.group(7)
+                })
+
+    # If we found data
+    if all_data:
+        df = pd.DataFrame(all_data)
+
+        st.success(f"✅ Extracted {len(df)} rows from {len(uploaded_files)} file(s).")
         st.dataframe(df, use_container_width=True)
 
-        # Save CSV to temporary directory
+        # Save to CSV
         with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp_csv:
             df.to_csv(tmp_csv.name, index=False)
             csv_path = tmp_csv.name
 
-        csv_filename = f"{pdf_name}.csv"
+        csv_filename = "combined_activity_data.csv"
 
-        if st.button("📤 Upload to Google Drive"):
+        if st.button("📤 Upload Combined Table to Google Drive"):
             try:
                 file_id = upload_csv_to_drive(csv_path, csv_filename, folder_id=DRIVE_FOLDER_ID)
-                st.success(f"✅ File uploaded successfully! [View File](https://drive.google.com/file/d/{file_id})")
+                st.success(f"✅ Uploaded! [View File](https://drive.google.com/file/d/{file_id})")
             except Exception as e:
                 st.error(f"❌ Upload failed: {str(e)}")
-
     else:
-        st.warning("⚠️ No structured activity data found in the PDF.")
+        st.warning("⚠️ No valid activity data found in the uploaded PDFs.")
 else:
-    st.info("👆 Upload a PDF file to get started.")
+    st.info("📂 Upload one or more PDF files to begin.")
