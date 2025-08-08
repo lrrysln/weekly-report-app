@@ -17,7 +17,7 @@ from google.auth.transport.requests import Request
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 CREDENTIALS_FILE = 'credentials.json'  # Your OAuth 2.0 credentials file
 TOKEN_PICKLE = 'token.pickle'
-DRIVE_FOLDER_ID = 'YOUR_GOOGLE_DRIVE_FOLDER_ID'  # Replace this with your folder ID
+DRIVE_FOLDER_ID = 'YOUR_GOOGLE_DRIVE_FOLDER_ID'  # Replace with your actual folder ID
 
 @st.cache_resource
 def authenticate_google_drive():
@@ -76,7 +76,7 @@ if uploaded_files:
         project_code = title_parts[0].strip() if len(title_parts) > 0 else "Unknown"
         project_name = title_parts[1].strip().title() if len(title_parts) > 1 else "Unknown Project"
 
-        # Extract text
+        # Extract text from PDF
         all_text = ""
         with pdfplumber.open(uploaded_file) as pdf:
             for page in pdf.pages:
@@ -84,7 +84,7 @@ if uploaded_files:
                 if page_text:
                     all_text += page_text + "\n"
 
-        # Regex pattern (improved)
+        # Regex pattern to match lines
         pattern = re.compile(r"^(\S+)\s+(.+?)\s+(\d+)\s+(\d{2}-\d{2}-\d{2})\s+(\d{2}-\d{2}-\d{2})\s+(\d+)\s+(.*)$")
         skipped_lines = []
 
@@ -119,7 +119,7 @@ if uploaded_files:
         st.success(f"✅ Extracted {len(df)} valid activities from {len(uploaded_files)} file(s).")
         st.dataframe(df, use_container_width=True)
 
-                # ===========================
+        # ===========================
         # 🔁 Compare Repeated Activities
         # ===========================
         dup_ids = df["Activity ID"][df["Activity ID"].duplicated(keep=False)]
@@ -135,21 +135,20 @@ if uploaded_files:
                 aggfunc="first"
             )
 
-# Flatten columns if MultiIndex (safe for 1 or many projects)
-if isinstance(comparison_df.columns, pd.MultiIndex):
-    comparison_df.columns = [
-        f"{val} ({proj_code} - {proj_name})" 
-        for val, (proj_code, proj_name) in comparison_df.columns
-    ]
-else:
-    comparison_df.columns = [str(col) for col in comparison_df.columns]
-
+            # Flatten MultiIndex columns (safe handling)
+            if isinstance(comparison_df.columns, pd.MultiIndex):
+                comparison_df.columns = [
+                    f"{val} ({proj_code} - {proj_name})"
+                    for val, (proj_code, proj_name) in comparison_df.columns
+                ]
+            else:
+                comparison_df.columns = [str(col) for col in comparison_df.columns]
 
             comparison_df = comparison_df.reset_index()
             st.dataframe(comparison_df, use_container_width=True)
         else:
             st.info("✅ No repeated activities found across files.")
-        
+
         # Save to CSV
         with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp_csv:
             df.to_csv(tmp_csv.name, index=False)
@@ -164,7 +163,7 @@ else:
             except Exception as e:
                 st.error(f"❌ Upload failed: {str(e)}")
 
-        # Optional: download skipped lines
+        # Optional: Download skipped lines
         if total_skipped:
             skipped_df = pd.DataFrame(total_skipped)
             skipped_csv_path = os.path.join(tempfile.gettempdir(), "skipped_lines.csv")
@@ -179,6 +178,3 @@ else:
         st.warning("⚠️ No valid activity data found in any of the uploaded PDFs.")
 else:
     st.info("📂 Upload one or more PDF files to begin.")
-
-
-
