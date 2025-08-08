@@ -135,11 +135,11 @@ if uploaded_files:
                 aggfunc="first"
             )
 
-            # Flatten MultiIndex columns (safe handling)
+            # ✅ Final corrected flattening code for 3-level MultiIndex
             if isinstance(comparison_df.columns, pd.MultiIndex):
                 comparison_df.columns = [
                     f"{val} ({proj_code} - {proj_name})"
-                    for val, (proj_code, proj_name) in comparison_df.columns
+                    for val, proj_code, proj_name in comparison_df.columns
                 ]
             else:
                 comparison_df.columns = [str(col) for col in comparison_df.columns]
