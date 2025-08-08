@@ -14,9 +14,6 @@ from google.auth.transport.requests import Request
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 import altair as alt
-from altair_saver import save as altair_save
-import altair as alt
-from altair_saver import save as altair_save
 
 # ======================
 # Google Drive Setup
@@ -24,7 +21,7 @@ from altair_saver import save as altair_save
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 CREDENTIALS_FILE = 'credentials.json'
 TOKEN_PICKLE = 'token.pickle'
-DRIVE_FOLDER_ID = 'YOUR_GOOGLE_DRIVE_FOLDER_ID'  # Replace with your actual folder ID
+DRIVE_FOLDER_ID = 'YOUR_GOOGLE_DRIVE_FOLDER_ID'  # Replace with your folder ID
 
 @st.cache_resource
 def authenticate_google_drive():
@@ -60,7 +57,6 @@ def upload_csv_to_drive(csv_path, file_name, folder_id=None):
         fields='id'
     ).execute()
     return file.get('id')
-
 
 def create_pdf_report(df, critical_df, selected_project, gantt_chart_img_path=None):
     output_path = os.path.join(tempfile.gettempdir(), f"Activity_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
@@ -110,6 +106,22 @@ def create_pdf_report(df, critical_df, selected_project, gantt_chart_img_path=No
     c.save()
     return output_path
 
+def categorize_activity(name):
+    name = name.lower()
+    if any(word in name for word in ["clear", "grade", "trench", "backfill", "earthwork", "site"]):
+        return "🏗 Site Work & Earthwork"
+    elif any(word in name for word in ["foundation", "slab", "footing", "structural"]):
+        return "🧱 Foundation & Structural"
+    elif any(word in name for word in ["tank", "dispenser", "piping", "fuel", "gas"]):
+        return "⚙️ Fuel System Installation"
+    elif any(word in name for word in ["building", "framing", "roof", "wall", "interior"]):
+        return "🛠️ Building Construction"
+    elif any(word in name for word in ["landscape", "sidewalk", "curb", "paving", "striping"]):
+        return "🌿 Landscaping & Finishing"
+    elif any(word in name for word in ["inspection", "punchlist", "handover", "final"]):
+        return "📋 Final Inspection & Handover"
+    else:
+        return "❓ Uncategorized"
 
 # ======================
 # Streamlit App
@@ -176,97 +188,164 @@ if uploaded_files:
             st.warning(f"⚠️ Found {len(invalid_dates)} rows with invalid date format:")
             st.dataframe(invalid_dates)
 
-        # Optionally drop those rows so they don’t break downstream logic
         df = df.dropna(subset=["Start Date", "Finish Date"])
 
-        # Simulate % complete
         np.random.seed(42)
         df["% Complete"] = np.random.randint(30, 100, size=len(df))
 
-        # Detect out-of-sequence activities
         df = df.sort_values(by=["Project Code", "Start Date"])
         df["Prev Finish"] = df.groupby("Project Code")["Finish Date"].shift(1)
         df["Out of Sequence"] = df["Start Date"] < df["Prev Finish"]
 
-        st.header("🔍 Step 2: Summary Insights")
+        # Prepare repeated activities DataFrame
+        dup_ids = df["Activity ID"][df["Activity ID"].duplicated(keep=False)]
+        repeated_df = df[df["Activity ID"].isin(dup_ids)]
+        if not repeated_df.empty:
+            repeated_df["Phase"] = repeated_df["Activity Name"].apply(categorize_activity)
+            repeated_df = repeated_df.sort_values(by=["Phase", "Activity ID", "Project Code", "Start Date"])
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("🗂 Total Activities", len(df))
-        col2.metric("📁 Projects", df["Project Code"].nunique())
-        col3.metric("🚨 Zero Float Tasks", len(df[df["Float"] == 0]))
+        # Tabs for navigation
+        tabs = st.tabs([
+            "📋 Extracted Data",
+            "🔁 Repeated Activities",
+            "📅 Timeline & Insights",
+            "📤 Upload Summary",
+            "📄 Reports & Upload"
+        ])
 
-        # 📅 Gantt Chart
-        st.subheader("📅 Activity Timeline by Project")
-        selected_project = st.selectbox("Select a project to view timeline", sorted(df["Project Name"].unique()))
-        project_df = df[df["Project Name"] == selected_project].sort_values(by="Start Date")
+        # Tab 1: Extracted Data Table
+        with tabs[0]:
+            st.header("📋 Extracted Data Table")
+            st.dataframe(df, use_container_width=True)
 
-        if not project_df.empty:
-            gantt_chart = alt.Chart(project_df).mark_bar().encode(
-                x='Start Date:T',
-                x2='Finish Date:T',
-                y=alt.Y('Activity Name:N', sort='-x'),
-                color=alt.Color('Float:Q', scale=alt.Scale(scheme='blues')),
-                tooltip=[
-                    'Activity ID', 'Activity Name', 'Duration',
-                    'Start Date', 'Finish Date', 'Float'
-                ]
-            ).properties(
-                height=400,
-                width=800,
-                title=f"Gantt Chart for {selected_project}"
-            )
-            st.altair_chart(gantt_chart, use_container_width=True)
-            
-            # Save Gantt chart
-            # Save as HTML
-            gantt_path = os.path.join(tempfile.gettempdir(), "gantt_chart.html")
-            gantt_chart.save(gantt_path)
+        # Tab 2: Repeated Activities
+        with tabs[1]:
+            st.header("🔁 Repeated Activities Comparison")
+            if not repeated_df.empty:
+                phase_grouped = repeated_df.groupby(["Phase", "Activity ID", "Activity Name"])
+                current_phase = None
+                for (phase, act_id, act_name), group in phase_grouped:
+                    if current_phase != phase:
+                        st.markdown(f"### {phase}")
+                        current_phase = phase
+                    with st.expander(f"🔁 {act_id} — {act_name}"):
+                        display_df = group[[
+                            "Project Code", "Project Name", "Duration",
+                            "Start Date", "Finish Date", "Float", "Notes"
+                        ]].reset_index(drop=True)
+                        st.dataframe(display_df, use_container_width=True)
+            else:
+                st.info("✅ No repeated activities found.")
 
-        # 🚨 Critical Tasks
-        st.subheader("🚨 Critical Tasks with Zero or Low Float")
-        float_threshold = st.slider("Set max float days to flag", min_value=0, max_value=30, value=2)
-        critical_df = df[df["Float"] <= float_threshold].sort_values(by="Float")
-        if not critical_df.empty:
-            st.warning(f"⚠️ {len(critical_df)} task(s) have float ≤ {float_threshold} days.")
-            st.dataframe(critical_df[[
-                "Project Code", "Project Name", "Activity ID", "Activity Name",
-                "Duration", "Start Date", "Finish Date", "Float", "Notes"
-            ]], use_container_width=True)
-        else:
-            st.success("✅ No critical tasks found.")
+        # Tab 3: Timeline & Insights
+        with tabs[2]:
+            st.header("📅 Activity Timeline & Summary Insights")
 
-        # 🔀 Out-of-sequence
-        violations = df[df["Out of Sequence"] == True]
-        if not violations.empty:
-            st.subheader("🔀 Out-of-Sequence Activities")
-            st.dataframe(violations[[
-                "Project Code", "Activity ID", "Activity Name", "Start Date", "Prev Finish"
-            ]], use_container_width=True)
+            col1, col2, col3 = st.columns(3)
+            col1.metric("🗂 Total Activities", len(df))
+            col2.metric("📁 Projects", df["Project Code"].nunique())
+            col3.metric("🚨 Zero Float Tasks", len(df[df["Float"] == 0]))
 
-        # PDF report
-        if st.button("📄 Generate PDF Report"):
-            try:
-                pdf_path = create_pdf_report(df, critical_df, selected_project, gantt_chart_img_path=gantt_path)
-                with open(pdf_path, "rb") as f:
-                    st.download_button("⬇️ Download PDF Report", f, file_name="Activity_Report.pdf", mime="application/pdf")
-            except Exception as e:
-                st.error(f"Error generating PDF: {e}")
+            selected_project = st.selectbox("Select a project to view timeline", sorted(df["Project Name"].unique()))
+            project_df = df[df["Project Name"] == selected_project].sort_values(by="Start Date")
 
-        # Upload to Google Drive
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp_csv:
-            df.to_csv(tmp_csv.name, index=False)
-            csv_path = tmp_csv.name
+            if not project_df.empty:
+                gantt_chart = alt.Chart(project_df).mark_bar().encode(
+                    x='Start Date:T',
+                    x2='Finish Date:T',
+                    y=alt.Y('Activity Name:N', sort='-x'),
+                    color=alt.Color('Float:Q', scale=alt.Scale(scheme='blues')),
+                    tooltip=[
+                        'Activity ID', 'Activity Name', 'Duration',
+                        'Start Date', 'Finish Date', 'Float'
+                    ]
+                ).properties(
+                    height=400,
+                    width=800,
+                    title=f"Gantt Chart for {selected_project}"
+                )
+                st.altair_chart(gantt_chart, use_container_width=True)
 
-        if st.button("📤 Upload Combined Table to Google Drive"):
-            try:
-                file_id = upload_csv_to_drive(csv_path, "combined_activity_data.csv", folder_id=DRIVE_FOLDER_ID)
-                st.success(f"✅ Uploaded! [View File](https://drive.google.com/file/d/{file_id})")
-            except Exception as e:
-                st.error(f"❌ Upload failed: {str(e)}")
+            st.subheader("🚨 Critical Tasks with Low Float")
+            float_threshold = st.slider("Set max float days to flag", min_value=0, max_value=30, value=2)
+            critical_df = df[df["Float"] <= float_threshold].sort_values(by="Float")
+            if not critical_df.empty:
+                st.warning(f"⚠️ {len(critical_df)} task(s) have float ≤ {float_threshold} days.")
+                st.dataframe(critical_df[[
+                    "Project Code", "Project Name", "Activity ID", "Activity Name",
+                    "Duration", "Start Date", "Finish Date", "Float", "Notes"
+                ]], use_container_width=True)
+            else:
+                st.success("✅ No critical tasks found with the selected float threshold.")
+
+            st.subheader("🚦 Out of Sequence Activities")
+            out_seq_df = df[df["Out of Sequence"]]
+            if not out_seq_df.empty:
+                st.error(f"❗ Found {len(out_seq_df)} out-of-sequence activities.")
+                st.dataframe(out_seq_df[[
+                    "Project Code", "Project Name", "Activity ID", "Activity Name",
+                    "Duration", "Start Date", "Finish Date", "Float", "Notes"
+                ]], use_container_width=True)
+            else:
+                st.success("✅ No out-of-sequence activities detected.")
+
+        # Tab 4: Upload Summary
+        with tabs[3]:
+            st.header("📤 Summary of Skipped Lines")
+            if total_skipped:
+                st.warning(f"⚠️ Skipped {len(total_skipped)} lines that didn't match pattern.")
+                skipped_df = pd.DataFrame(total_skipped)
+                st.dataframe(skipped_df, use_container_width=True)
+            else:
+                st.success("✅ No lines skipped. All data parsed successfully.")
+
+        # Tab 5: Reports and Google Drive Upload
+        with tabs[4]:
+            st.header("📄 Generate Report & Upload CSV")
+
+            # Generate CSV for upload
+            csv_path = os.path.join(tempfile.gettempdir(), "extracted_activity_data.csv")
+            df.to_csv(csv_path, index=False)
+
+            if st.button("⬇️ Download Extracted Data CSV"):
+                with open(csv_path, "rb") as f:
+                    st.download_button(
+                        label="Download CSV",
+                        data=f,
+                        file_name="extracted_activity_data.csv",
+                        mime="text/csv"
+                    )
+
+            if st.button("📊 Generate PDF Summary Report"):
+                # Save gantt chart as PNG temporarily
+                gantt_img_path = os.path.join(tempfile.gettempdir(), "gantt_chart.png")
+                chart = alt.Chart(project_df).mark_bar().encode(
+                    x='Start Date:T',
+                    x2='Finish Date:T',
+                    y=alt.Y('Activity Name:N', sort='-x'),
+                    color=alt.Color('Float:Q', scale=alt.Scale(scheme='blues')),
+                    tooltip=[
+                        'Activity ID', 'Activity Name', 'Duration',
+                        'Start Date', 'Finish Date', 'Float'
+                    ]
+                ).properties(
+                    height=400,
+                    width=800,
+                    title=f"Gantt Chart for {selected_project}"
+                )
+                chart.save(gantt_img_path)
+                pdf_path = create_pdf_report(df, critical_df, selected_project, gantt_img_path)
+                with open(pdf_path, "rb") as pdf_file:
+                    st.download_button("⬇️ Download PDF Report", pdf_file.read(), file_name="Activity_Report.pdf", mime="application/pdf")
+
+            if st.button("☁️ Upload CSV to Google Drive"):
+                try:
+                    file_id = upload_csv_to_drive(csv_path, f"Activity_Data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", DRIVE_FOLDER_ID)
+                    st.success(f"✅ CSV uploaded successfully! File ID: {file_id}")
+                except Exception as e:
+                    st.error(f"❌ Failed to upload to Google Drive: {e}")
+
     else:
-        st.warning("⚠️ No valid activity data found.")
+        st.warning("❌ No valid activity data extracted from uploaded PDFs. Please check your files.")
 else:
-    st.info("📂 Upload one or more PDF files to begin.")
-
-
-
+    st.info("🔎 Upload PDF files to extract and analyze activities.")
