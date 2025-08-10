@@ -12,6 +12,7 @@ PyPDF2
 matplotlib
 seaborn
 fpdf
+scipy
 
 
 
