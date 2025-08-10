@@ -9,6 +9,7 @@ google-auth-httplib2
 google-auth-oauthlib
 kaleido
 PyPDF2
+matplotlib
 
 
 
