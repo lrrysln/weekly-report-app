@@ -1,13 +1,4 @@
 #!/usr/bin/env python3
-"""
-post_construction_report.py
-
-Generates Post-Construction Performance Reports (Excel + PDF + optional PPTX)
-from a CSV/Excel of project-level data.
-
-Author: ChatGPT (assistant)
-Date: 2025-08-10
-"""
 import argparse
 import os
 import math
@@ -385,3 +376,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
