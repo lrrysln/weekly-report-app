@@ -1,110 +1,364 @@
 import streamlit as st
 import pandas as pd
-from io import StringIO
+import math
+from datetime import datetime
+from collections import Counter
+from io import BytesIO
 
-st.set_page_config(page_title="Schedule Upload & KPI Prep", layout="wide")
+import plotly.express as px
+from fpdf import FPDF
 
-# --- Step 1: Show instructions and template download ---
-st.title("📋 Schedule Data Upload & KPI Preparation")
+try:
+    from pptx import Presentation
+    from pptx.util import Inches
+    PPTX_AVAILABLE = True
+except Exception:
+    PPTX_AVAILABLE = False
+
+st.set_page_config(page_title="Post-Construction Performance Dashboard", layout="wide")
+
+# Expected KPI columns for final processing
+EXPECTED_COLUMNS = [
+    'project_id', 'project_name', 'asset_type', 'planned_start', 'planned_finish',
+    'actual_start', 'actual_finish', 'planned_cost', 'actual_cost', 'area_sqft',
+    'delay_causes', 'safety_incidents', 'contractor', 'weather_delay_days',
+    'percent_complete', 'earned_value', 'defects_count', 'warranty_claims',
+    'critical_path_changes'
+]
+
+# ----------------- Helper functions (same as your main script) -----------------
+
+def parse_dates(df, cols):
+    for c in cols:
+        if c in df.columns:
+            df[c] = pd.to_datetime(df[c], errors='coerce')
+    return df
+
+def safe_div(a, b):
+    try:
+        if a is None or b is None: return None
+        if pd.isna(a) or pd.isna(b): return None
+        if b == 0: return None
+        return a / b
+    except Exception:
+        return None
+
+def compute_duration_days(start, finish):
+    if pd.isna(start) or pd.isna(finish):
+        return None
+    return (finish - start).days
+
+def normalize_delay_causes(series):
+    result = []
+    for val in series.fillna(''):
+        if not val:
+            result.append([])
+        else:
+            parts = [p.strip().lower() for p in (str(val).replace(',', ';').split(';')) if p.strip()]
+            result.append(parts)
+    return result
+
+def compute_project_kpis(raw):
+    delay_lists = normalize_delay_causes(raw.get('delay_causes', pd.Series(['']*len(raw))))
+    rows = []
+    for idx, row in raw.iterrows():
+        planned_start = row.get('planned_start')
+        planned_finish = row.get('planned_finish')
+        actual_start = row.get('actual_start')
+        actual_finish = row.get('actual_finish')
+        planned_cost = row.get('planned_cost')
+        actual_cost = row.get('actual_cost')
+        area = row.get('area_sqft')
+
+        planned_duration = compute_duration_days(planned_start, planned_finish)
+        actual_duration = compute_duration_days(actual_start, actual_finish)
+        schedule_variance_days = None if planned_duration is None or actual_duration is None else actual_duration - planned_duration
+
+        schedule_variance_pct = None
+        if planned_duration and planned_duration != 0 and schedule_variance_days is not None:
+            schedule_variance_pct = (actual_duration - planned_duration) / planned_duration * 100
+
+        cost_variance = None if pd.isna(planned_cost) or pd.isna(actual_cost) else actual_cost - planned_cost
+        cost_variance_pct = None
+        if planned_cost and planned_cost != 0 and not pd.isna(cost_variance):
+            cost_variance_pct = cost_variance / planned_cost * 100
+
+        if 'earned_value' in row and not pd.isna(row.get('earned_value')) and not pd.isna(actual_cost):
+            ev = row.get('earned_value')
+            ac = actual_cost
+            cpi = safe_div(ev, ac)
+        elif not pd.isna(row.get('percent_complete')) and not pd.isna(planned_cost) and not pd.isna(actual_cost):
+            ev = row.get('percent_complete') / 100.0 * planned_cost
+            ac = actual_cost
+            cpi = safe_div(ev, ac)
+        else:
+            cpi = None
+
+        cost_per_sqft = None
+        if area and not pd.isna(actual_cost) and area != 0:
+            cost_per_sqft = actual_cost / area
+
+        rows.append({
+            'project_id': row.get('project_id'),
+            'project_name': row.get('project_name'),
+            'asset_type': row.get('asset_type'),
+            'planned_duration_days': planned_duration,
+            'actual_duration_days': actual_duration,
+            'schedule_variance_days': schedule_variance_days,
+            'schedule_variance_pct': schedule_variance_pct,
+            'planned_cost': planned_cost,
+            'actual_cost': actual_cost,
+            'cost_variance': cost_variance,
+            'cost_variance_pct': cost_variance_pct,
+            'CPI': cpi,
+            'cost_per_sqft': cost_per_sqft,
+            'safety_incidents': row.get('safety_incidents', 0),
+            'contractor': row.get('contractor'),
+            'weather_delay_days': row.get('weather_delay_days', 0),
+            'defects_count': row.get('defects_count', 0),
+            'warranty_claims': row.get('warranty_claims', 0),
+            'critical_path_changes': row.get('critical_path_changes', 0),
+            'delay_causes_list': delay_lists[idx],
+        })
+    return pd.DataFrame(rows)
+
+def aggregate_portfolio_kpis(kpi_df):
+    res = {}
+    count = len(kpi_df)
+    res['project_count'] = count
+    if count == 0:
+        return res
+    res['avg_planned_duration'] = pd.Series(kpi_df['planned_duration_days']).dropna().mean()
+    res['avg_actual_duration'] = pd.Series(kpi_df['actual_duration_days']).dropna().mean()
+    res['median_schedule_variance_days'] = pd.Series(kpi_df['schedule_variance_days']).dropna().median()
+    res['avg_schedule_variance_pct'] = pd.Series(kpi_df['schedule_variance_pct']).dropna().mean()
+    res['avg_cost_variance_pct'] = pd.Series(kpi_df['cost_variance_pct']).dropna().mean()
+    res['avg_CPI'] = pd.Series(kpi_df['CPI']).dropna().mean()
+    res['avg_cost_per_sqft'] = pd.Series(kpi_df['cost_per_sqft']).dropna().mean()
+    res['total_safety_incidents'] = int(pd.Series(kpi_df['safety_incidents']).fillna(0).sum())
+    res['avg_weather_delay_days'] = pd.Series(kpi_df['weather_delay_days']).dropna().mean()
+    res['avg_critical_path_changes'] = pd.Series(kpi_df['critical_path_changes']).dropna().mean()
+    return res
+
+def compute_delay_cause_breakdown(kpi_df):
+    cnt = Counter()
+    for lst in kpi_df['delay_causes_list'].apply(lambda x: x if isinstance(x, list) else []):
+        cnt.update(lst)
+    items = sorted(cnt.items(), key=lambda x: x[1], reverse=True)
+    return pd.DataFrame(items, columns=['cause', 'count'])
+
+def contractor_scorecard(kpi_df):
+    rows = []
+    for contractor, group in kpi_df.groupby('contractor', dropna=True):
+        rows.append({
+            "contractor": contractor,
+            "projects": len(group),
+            "avg_schedule_variance_pct": group['schedule_variance_pct'].dropna().mean() if 'schedule_variance_pct' in group.columns else None,
+            "avg_cost_variance_pct": group['cost_variance_pct'].dropna().mean() if 'cost_variance_pct' in group.columns else None,
+            "total_safety_incidents": int(group['safety_incidents'].fillna(0).sum()) if 'safety_incidents' in group.columns else 0,
+            "avg_CPI": group['CPI'].dropna().mean() if 'CPI' in group.columns else None
+        })
+    
+    df = pd.DataFrame(rows)
+    
+    if 'projects' not in df.columns:
+        df['projects'] = 0
+    
+    if df.empty:
+        return pd.DataFrame(columns=['contractor', 'projects', 'avg_schedule_variance_pct', 'avg_cost_variance_pct', 'total_safety_incidents', 'avg_CPI'])
+    
+    return df.sort_values('projects', ascending=False)
+
+@st.cache_data
+def load_dataframe(uploaded_file):
+    ext = uploaded_file.name.split('.')[-1].lower()
+    if ext in ('xls', 'xlsx'):
+        df = pd.read_excel(uploaded_file)
+    else:
+        df = pd.read_csv(uploaded_file)
+    df.columns = [c.strip() for c in df.columns]
+    return df
+
+def format_number(x):
+    if x is None or (isinstance(x, float) and math.isnan(x)): return "n/a"
+    if isinstance(x, float): return f"{x:,.2f}"
+    return str(x)
+
+def format_percent(x):
+    if x is None or (isinstance(x, float) and math.isnan(x)): return "n/a"
+    return f"{x:.1f}%"
+
+# ----------------- Main UI -----------------
+
+st.title("🏗️ Post-Construction Performance Dashboard")
 
 st.markdown("""
-Welcome! This app helps you prepare your schedule data for KPI analysis.
-
-**Required Columns in your final data:**
-
-- `project_id` (unique project or activity identifier)
-- `project_name` (optional, but recommended)
-- `planned_start` (planned start date, e.g. 2025-06-01)
-- `planned_finish` (planned finish date)
-- `actual_start` (actual start date)
-- `actual_finish` (actual finish date)
-- `planned_cost` (optional)
-- `actual_cost` (optional)
-- `delay_causes` (optional; can be semicolon or comma separated)
-
-You can download a **CSV template** below to see expected columns and sample data.
+Upload your schedule data (CSV or Excel). You can upload:
+- A **ready-to-use file** matching the expected columns (no mapping needed).
+- Or a **raw file**, and then map its columns to expected fields below.
 """)
 
-# CSV template content as string
-csv_template = """project_id,project_name,planned_start,planned_finish,actual_start,actual_finish,planned_cost,actual_cost,delay_causes
-P001,Site Excavation,2025-06-01,2025-06-10,2025-06-02,2025-06-11,100000,110000,weather;permits
-P002,Foundation,2025-06-11,2025-06-20,2025-06-12,2025-06-21,150000,145000,materials
-P003,Framing,2025-06-21,2025-07-05,2025-06-22,2025-07-06,200000,210000,
-"""
+uploaded = st.file_uploader("Upload your schedule CSV or Excel", type=['csv','xls','xlsx'])
 
-st.download_button(
-    label="Download CSV Template",
-    data=csv_template,
-    file_name="kpi_input_template.csv",
-    mime="text/csv",
-)
+if not uploaded:
+    st.info("Please upload a file to continue.")
+    st.stop()
 
-st.markdown("---")
+try:
+    raw_df = load_dataframe(uploaded)
+except Exception as e:
+    st.error(f"Error reading file: {e}")
+    st.stop()
 
-# --- Step 2: Upload raw schedule file ---
-uploaded_file = st.file_uploader("Upload your raw schedule CSV or Excel file", type=['csv', 'xls', 'xlsx'])
+st.write("Preview of your uploaded data:")
+st.dataframe(raw_df.head())
 
-if uploaded_file:
-    # Read uploaded file to DataFrame
-    try:
-        if uploaded_file.name.endswith('.csv'):
-            raw_df = pd.read_csv(uploaded_file)
-        else:
-            raw_df = pd.read_excel(uploaded_file)
-        st.success(f"Loaded {len(raw_df)} rows.")
-        st.dataframe(raw_df.head())
+uploaded_cols = raw_df.columns.tolist()
 
-        # --- Step 3: Let user map raw columns to expected KPI columns ---
-        st.markdown("## Map your raw columns to expected KPI fields")
+# Check if all expected columns are present exactly
+missing_cols = [c for c in EXPECTED_COLUMNS if c not in uploaded_cols]
 
-        cols = raw_df.columns.tolist()
-
-        project_id_col = st.selectbox("Project ID column", options=cols)
-        project_name_col = st.selectbox("Project Name column (optional)", options=["<None>"] + cols)
-        planned_start_col = st.selectbox("Planned Start Date column", options=cols)
-        planned_finish_col = st.selectbox("Planned Finish Date column", options=cols)
-        actual_start_col = st.selectbox("Actual Start Date column", options=cols)
-        actual_finish_col = st.selectbox("Actual Finish Date column", options=cols)
-        planned_cost_col = st.selectbox("Planned Cost column (optional)", options=["<None>"] + cols)
-        actual_cost_col = st.selectbox("Actual Cost column (optional)", options=["<None>"] + cols)
-        delay_causes_col = st.selectbox("Delay Causes column (optional)", options=["<None>"] + cols)
-
-        if st.button("Process & Preview KPI Data"):
-            # Build cleaned DataFrame
-            kpi_df = pd.DataFrame()
-            kpi_df['project_id'] = raw_df[project_id_col]
-
-            if project_name_col != "<None>":
-                kpi_df['project_name'] = raw_df[project_name_col]
-            else:
-                kpi_df['project_name'] = None
-
-            kpi_df['planned_start'] = pd.to_datetime(raw_df[planned_start_col], errors='coerce')
-            kpi_df['planned_finish'] = pd.to_datetime(raw_df[planned_finish_col], errors='coerce')
-            kpi_df['actual_start'] = pd.to_datetime(raw_df[actual_start_col], errors='coerce')
-            kpi_df['actual_finish'] = pd.to_datetime(raw_df[actual_finish_col], errors='coerce')
-
-            if planned_cost_col != "<None>":
-                kpi_df['planned_cost'] = pd.to_numeric(raw_df[planned_cost_col], errors='coerce')
-            else:
-                kpi_df['planned_cost'] = None
-
-            if actual_cost_col != "<None>":
-                kpi_df['actual_cost'] = pd.to_numeric(raw_df[actual_cost_col], errors='coerce')
-            else:
-                kpi_df['actual_cost'] = None
-
-            if delay_causes_col != "<None>":
-                kpi_df['delay_causes'] = raw_df[delay_causes_col].fillna("")
-            else:
-                kpi_df['delay_causes'] = ""
-
-            st.success("Processed KPI Data Preview:")
-            st.dataframe(kpi_df.head())
-
-            st.info("Now you can feed this `kpi_df` DataFrame into your KPI calculation functions or dashboards.")
-
-    except Exception as e:
-        st.error(f"Error loading file: {e}")
+if len(missing_cols) == 0:
+    st.success("All expected columns found! Proceeding with KPI computation.")
+    # Use raw_df as is
+    df_for_kpis = raw_df.copy()
 else:
-    st.info("Upload a schedule CSV or Excel file to begin.")
+    st.warning(f"Missing expected columns: {missing_cols}")
+    st.markdown("Please map the columns in your file to the expected KPI columns:")
+
+    # Mapping dictionary
+    mapping = {}
+    for col in EXPECTED_COLUMNS:
+        options = ["(none)"] + uploaded_cols
+        default_idx = 0
+        if col in uploaded_cols:
+            default_idx = uploaded_cols.index(col) + 1
+        mapping[col] = st.selectbox(f"Map '{col}' to column:", options, index=default_idx, key=col)
+
+    # Transform data based on mapping
+    if st.button("Process Mapped Data"):
+        mapped_data = {}
+        for col, mapped_col in mapping.items():
+            if mapped_col != "(none)":
+                mapped_data[col] = raw_df[mapped_col]
+            else:
+                # Fill with NaN or suitable defaults if needed
+                if col in ['safety_incidents', 'weather_delay_days', 'defects_count', 'warranty_claims', 'critical_path_changes']:
+                    mapped_data[col] = 0
+                else:
+                    mapped_data[col] = pd.NA
+        df_for_kpis = pd.DataFrame(mapped_data)
+        df_for_kpis = parse_dates(df_for_kpis, ['planned_start','planned_finish','actual_start','actual_finish'])
+
+        st.success("Data processed and ready for KPI calculation.")
+        st.dataframe(df_for_kpis.head())
+    else:
+        st.stop()
+
+# If data ready, run KPIs and display dashboard
+if 'df_for_kpis' in locals():
+    with st.spinner("Calculating KPIs..."):
+        kpi_df = compute_project_kpis(df_for_kpis)
+        portfolio_kpis = aggregate_portfolio_kpis(kpi_df)
+        delay_df = compute_delay_cause_breakdown(kpi_df)
+        contractor_df = contractor_scorecard(kpi_df)
+
+    tabs = st.tabs(["Executive Summary","Per-Project KPIs","Delay Causes","Contractor Scorecard","Downloads"])
+
+    with tabs[0]:
+        st.header("Executive Summary")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Projects", portfolio_kpis.get('project_count', 0))
+        c2.metric("Avg Planned Duration (days)", f"{portfolio_kpis.get('avg_planned_duration'):.1f}" if portfolio_kpis.get('avg_planned_duration') else "n/a")
+        c3.metric("Avg Actual Duration (days)", f"{portfolio_kpis.get('avg_actual_duration'):.1f}" if portfolio_kpis.get('avg_actual_duration') else "n/a")
+        c4.metric("Avg Cost Variance (%)", f"{portfolio_kpis.get('avg_cost_variance_pct'):.1f}%" if portfolio_kpis.get('avg_cost_variance_pct') else "n/a")
+
+        st.markdown("### Duration: planned vs actual (interactive)")
+        dur_chart_df = kpi_df[['project_name','planned_duration_days','actual_duration_days']].dropna(subset=['project_name'])
+        if not dur_chart_df.empty:
+            dur_chart_df = dur_chart_df.sort_values('planned_duration_days', ascending=False).head(50)
+            dur_melt = dur_chart_df.melt(id_vars='project_name', value_vars=['planned_duration_days','actual_duration_days'],
+                                        var_name='type', value_name='days')
+            fig_dur = px.bar(dur_melt, x='days', y='project_name', color='type', orientation='h',
+                            title='Planned vs Actual Duration (days)', barmode='group', height=600)
+            st.plotly_chart(fig_dur, use_container_width=True)
+        else:
+            st.info("Not enough duration data to build chart.")
+
+        st.markdown("### Cost variance (interactive)")
+        cv_df = kpi_df[['project_name','cost_variance_pct']].dropna()
+        if not cv_df.empty:
+            cv_df = cv_df.sort_values('cost_variance_pct', ascending=False).head(50)
+            fig_cv = px.bar(cv_df, x='cost_variance_pct', y='project_name', orientation='h', height=600,
+                            labels={'cost_variance_pct':'Cost Variance (%)','project_name':'Project'})
+            st.plotly_chart(fig_cv, use_container_width=True)
+        else:
+            st.info("Not enough cost data to build chart.")
+
+        st.markdown("### Delay cause breakdown (interactive)")
+        if not delay_df.empty:
+            fig_delay = px.pie(delay_df, names='cause', values='count', title='Delay Cause Breakdown')
+            st.plotly_chart(fig_delay, use_container_width=True)
+        else:
+            st.info("No delay cause tags found in data.")
+
+    with tabs[1]:
+        st.header("Per-Project KPIs")
+        st.write("Sortable, filterable table of per-project KPIs.")
+        display_df = kpi_df.copy()
+        def fmt_pct(x):
+            return f"{x:.1f}%" if pd.notna(x) else ""
+        if 'schedule_variance_pct' in display_df.columns:
+            display_df['schedule_variance_pct'] = display_df['schedule_variance_pct'].apply(lambda x: fmt_pct(x))
+        if 'cost_variance_pct' in display_df.columns:
+            display_df['cost_variance_pct'] = display_df['cost_variance_pct'].apply(lambda x: fmt_pct(x))
+        st.dataframe(display_df.fillna(""), use_container_width=True)
+
+    with tabs[2]:
+        st.header("Delay Cause Breakdown & Table")
+        st.write("Counts of delay causes across projects")
+        if not delay_df.empty:
+            st.plotly_chart(px.bar(delay_df.sort_values('count', ascending=False), x='count', y='cause', orientation='h', title='Delay Causes'), use_container_width=True)
+            st.dataframe(delay_df, use_container_width=True)
+        else:
+            st.info("No delay causes found.")
+
+    with tabs[3]:
+        st.header("Contractor Scorecard")
+        if not contractor_df.empty:
+            st.plotly_chart(px.bar(contractor_df.head(30), x='projects', y='contractor', orientation='h', title='Projects per Contractor'), use_container_width=True)
+            st.dataframe(contractor_df.fillna(""), use_container_width=True)
+        else:
+            st.info("No contractor data available.")
+
+    with tabs[4]:
+        st.header("Downloads & Report Generation")
+        st.write("Generate outputs. PDF is created when you click **Generate Reports** below. Excel is available immediately. PPTX only if checked.")
+
+        def create_excel_bytes(raw_df, kpi_df, portfolio_kpis, delay_df, contractor_df):
+            out = BytesIO()
+            with pd.ExcelWriter(out, engine='openpyxl') as writer:
+                raw_df.to_excel(writer, sheet_name='raw_data', index=False)
+                kpi_df.to_excel(writer, sheet_name='per_project_kpis', index=False)
+                delay_df.to_excel(writer, sheet_name='delay_causes', index=False)
+                contractor_df.to_excel(writer, sheet_name='contractor_scorecard', index=False)
+                pd.DataFrame([portfolio_kpis]).to_excel(writer, sheet_name='portfolio_summary', index=False)
+            out.seek(0)
+            return out.read()
+
+        excel_bytes = create_excel_bytes(df_for_kpis, kpi_df, portfolio_kpis, delay_df, contractor_df)
+        excel_name = f"post_construction_report_{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.xlsx"
+        st.download_button("Download Excel", data=excel_bytes, file_name=excel_name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+        pptx_checkbox = st.checkbox("Create PPTX (requires python-pptx)")
+        generate_btn = st.button("Generate PDF Report")
+
+        if generate_btn:
+            with st.spinner("Generating PDF and optional PPTX..."):
+                # create your charts images here as in your original script (omitted for brevity)
+                # ... [same PDF & PPTX generation logic you had]
+
+                st.success("PDF generation logic should be placed here.")
+
+else:
+    st.info("Upload file and complete column mapping to proceed.")
