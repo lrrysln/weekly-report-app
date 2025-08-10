@@ -143,15 +143,10 @@ def is_weather_delay(date, forecast_data, rain_threshold=1):
 # Weather Forecast Rendering (with improved dark mode visibility)
 # ======================
 def render_weather_forecast(forecast_data, days=7):
-    """
-    Render 7-day weather forecast as HTML blocks with icons and color alerts.
-    Weather descriptions use a light color (#ccc) for better visibility on dark mode.
-    """
     alerts = []
     today = datetime.utcnow().date()
     future_days = [today + timedelta(days=i) for i in range(days)]
 
-    # Group forecasts by date
     daily_forecast = {str(day): [] for day in future_days}
     for entry in forecast_data.get('list', []):
         date_str = entry['dt_txt'].split()[0]
@@ -190,7 +185,6 @@ def render_weather_forecast(forecast_data, days=7):
 
         font_style = f"color:{color}; font-weight:{'bold' if bold else 'normal'}"
 
-        # NOTE: Here we add inline style color:#ccc for weather description for visibility on dark mode
         html_blocks.append(f"""
             <div style="padding:5px 10px; margin:5px; border:1px solid #ccc; border-radius:5px;">
                 <div><strong>{date}</strong> — <span style="{font_style}">{', '.join(set(weather_descs))}</span> {''.join(set(icons))}</div>
@@ -209,12 +203,10 @@ def render_weather_forecast(forecast_data, days=7):
 st.set_page_config(page_title="Multi-PDF Activity Extractor", layout="wide")
 st.title("📄 Multi-PDF Activity Extractor & Google Drive Uploader")
 
-# File uploader: multiple PDF files allowed
 uploaded_files = st.file_uploader("Upload one or more PDF files", type="pdf", accept_multiple_files=True)
 
 if uploaded_files:
     all_data, total_skipped = [], []
-    # Loop over each uploaded PDF
     for uploaded_file in uploaded_files:
         pdf_name = os.path.splitext(uploaded_file.name)[0]
         st.info(f"📄 Processing: `{uploaded_file.name}`")
@@ -227,7 +219,6 @@ if uploaded_files:
                 txt = page.extract_text()
                 if txt:
                     text += txt + "\n"
-        # Regex pattern to parse activity lines from the PDF text
         pattern = re.compile(r"^(\S+)\s+(.+?)\s+(\d+)\s+(\d{2}-\d{2}-\d{2})\s+(\d{2}-\d{2}-\d{2})\s+(\d+)\s+(.*)$")
         for line in text.strip().split('\n'):
             m = pattern.match(line.strip())
@@ -247,8 +238,10 @@ if uploaded_files:
                 total_skipped.append({"PDF": uploaded_file.name, "Line": line})
 
     if all_data:
-        # Create dataframe and preprocess dates and flags
         df = pd.DataFrame(all_data)
+        # Clean Activity ID before duplicate detection
+        df["Activity ID"] = df["Activity ID"].astype(str).str.strip()
+
         df["Start Date"] = pd.to_datetime(df["Start Date"], format="%m-%d-%y", errors="coerce")
         df["Finish Date"] = pd.to_datetime(df["Finish Date"], format="%m-%d-%y", errors="coerce")
         invalid = df[df["Start Date"].isna() | df["Finish Date"].isna()]
@@ -262,20 +255,22 @@ if uploaded_files:
         df["Prev Finish"] = df.groupby("Project Code")["Finish Date"].shift(1)
         df["Out of Sequence"] = df["Start Date"] < df["Prev Finish"]
 
-        # Detect repeated activity IDs
-        dup = df["Activity ID"][df["Activity ID"].duplicated(keep=False)]
-        repeated_df = df[df["Activity ID"].isin(dup)]
+        # Duplicate detection logic, with debugging
+        dup_ids = df["Activity ID"][df["Activity ID"].duplicated(keep=False)].unique()
+        st.write(f"Duplicate Activity IDs found: {len(dup_ids)}")
+
+        repeated_df = df[df["Activity ID"].isin(dup_ids)].copy()
         if not repeated_df.empty:
             repeated_df["Phase"] = repeated_df["Activity Name"].apply(categorize_activity)
             repeated_df.sort_values(by=["Phase", "Activity ID", "Project Code", "Start Date"], inplace=True)
 
-        # Create app tabs
+        # Tabs
         tabs = st.tabs([
             "📋 Extracted Data", "🔁 Repeated Activities", "📅 Timeline & Insights",
             "📤 Upload Summary", "📄 Reports & Upload"
         ])
 
-        # Tab 1: Raw extracted data
+        # Tab 1: Extracted data
         with tabs[0]:
             st.header("📋 Extracted Data Table")
             st.dataframe(df, use_container_width=True)
@@ -293,10 +288,9 @@ if uploaded_files:
             else:
                 st.info("✅ No repeated activities found.")
 
-        # Tab 3: Timeline, weather forecast, and insights
+        # Tab 3: Timeline & weather
         with tabs[2]:
             st.header("📅 Activity Timeline & Summary Insights")
-
             col1, col2, col3 = st.columns(3)
             col1.metric("🗂 Total Activities", len(df))
             col2.metric("📁 Projects", df["Project Code"].nunique())
@@ -305,7 +299,6 @@ if uploaded_files:
             project = st.selectbox("Select a project", sorted(df["Project Name"].unique()))
             project_df = df[df["Project Name"] == project].sort_values(by="Start Date")
 
-            # Weather forecast input and display
             loc = st.text_input("Enter project location (city name) for 7-day weather forecast")
             forecast_data = get_weather_forecast(loc) if loc else None
 
@@ -313,7 +306,6 @@ if uploaded_files:
                 st.subheader(f"🌦 7-Day Weather Forecast for {loc}")
                 html_blocks, alerts = render_weather_forecast(forecast_data)
 
-                # Inject CSS style for weather-description class (optional)
                 st.markdown("""
                 <style>
                     .weather-description {
@@ -333,11 +325,9 @@ if uploaded_files:
                     st.success("✅ No severe weather expected.")
 
             if not project_df.empty:
-                # Flag weather delay risk per activity start date
                 project_df["Weather Delay Risk"] = project_df["Start Date"].apply(
                     lambda d: is_weather_delay(d, forecast_data)) if forecast_data else False
 
-                # Render Gantt chart with Altair
                 gantt = alt.Chart(project_df).mark_bar().encode(
                     x='Start Date:T', x2='Finish Date:T',
                     y=alt.Y('Activity Name:N', sort='-x'),
@@ -346,7 +336,6 @@ if uploaded_files:
                 ).properties(width=900, height=400, title=f"Gantt – {project}")
                 st.altair_chart(gantt, use_container_width=True)
 
-                # Float threshold slider to highlight critical tasks
                 float_threshold = st.slider("Highlight tasks with float ≤", 0, 20, 5)
                 critical_df = project_df[project_df["Float"] <= float_threshold]
 
@@ -377,4 +366,6 @@ if uploaded_files:
             if st.button("Upload CSV to Google Drive"):
                 try:
                     fid = upload_csv_to_drive(temp_csv, os.path.basename(temp_csv), folder_id=DRIVE_FOLDER_ID)
-                    st.success(f"Uploaded successfully! File ID:
+                    st.success(f"Uploaded successfully! File ID: {fid}")
+                except Exception as e:
+                    st.error(f"Upload failed: {e}")
