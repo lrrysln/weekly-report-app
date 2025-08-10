@@ -6,7 +6,7 @@ import os
 import tempfile
 import pickle
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -124,6 +124,59 @@ def is_weather_delay(date, forecast_data, rain_threshold=1):
                 return True
     return False
 
+# NEW: Helper function from Step 1
+def render_weather_forecast(forecast_data, days=7):
+    alerts = []
+    today = datetime.utcnow().date()
+    future_days = [today + timedelta(days=i) for i in range(days)]
+
+    # Group forecasts by date
+    daily_forecast = {str(day): [] for day in future_days}
+    for entry in forecast_data.get('list', []):
+        date_str = entry['dt_txt'].split()[0]
+        if datetime.strptime(date_str, '%Y-%m-%d').date() in future_days:
+            daily_forecast[date_str].append(entry)
+
+    html_blocks = []
+    for date, entries in daily_forecast.items():
+        if not entries:
+            continue
+
+        temps = [e['main']['temp'] for e in entries]
+        weather_descs = [e['weather'][0]['description'] for e in entries]
+        icons = []
+        color = "black"
+        bold = False
+
+        if any("rain" in desc for desc in weather_descs):
+            icons.append("🌧")
+            alerts.append(f"🌧 Rain expected on {date}")
+        if any("snow" in desc for desc in weather_descs):
+            icons.append("❄️")
+            alerts.append(f"❄️ Snow expected on {date}")
+
+        max_temp = max(temps)
+        min_temp = min(temps)
+
+        if max_temp >= 35:
+            bold = True
+            color = "red"
+            alerts.append(f"🔥 Extreme heat expected on {date} (up to {max_temp}°C)")
+        elif min_temp <= -5:
+            bold = True
+            color = "blue"
+            alerts.append(f"🧊 Extreme cold expected on {date} (low of {min_temp}°C)")
+
+        font_style = f"color:{color}; font-weight:{'bold' if bold else 'normal'}"
+        html_blocks.append(f"""
+            <div style="padding:5px 10px; margin:5px; border:1px solid #ccc; border-radius:5px;">
+                <div><strong>{date}</strong> — <span style="{font_style}">{', '.join(set(weather_descs))}</span> {''.join(set(icons))}</div>
+                <div style="font-size: 0.9em;">Temp: {min_temp:.1f}°C to {max_temp:.1f}°C</div>
+            </div>
+        """)
+
+    return html_blocks, alerts
+
 # ======================
 # Streamlit App
 # ======================
@@ -217,13 +270,23 @@ if uploaded_files:
             project = st.selectbox("Select a project", sorted(df["Project Name"].unique()))
             project_df = df[df["Project Name"] == project].sort_values(by="Start Date")
 
-            loc = st.text_input("Enter project location (city name) for weather forecast")
+            # NEW: Updated weather forecast section
+            loc = st.text_input("Enter project location (city name) for 7-day weather forecast")
             forecast_data = get_weather_forecast(loc) if loc else None
+
             if forecast_data:
-                st.subheader(f"🌦 5‑Day Weather Forecast for {loc}")
-                for item in forecast_data['list'][:10]:
-                    st.write(f"{item['dt_txt']}: {item['weather'][0]['description'].capitalize()}, "
-                              f"Rain (3h): {item.get('rain', {}).get('3h', 0)} mm")
+                st.subheader(f"🌦 7-Day Weather Forecast for {loc}")
+                html_blocks, alerts = render_weather_forecast(forecast_data)
+
+                for block in html_blocks:
+                    st.markdown(block, unsafe_allow_html=True)
+
+                if alerts:
+                    st.error("🚨 Upcoming Weather Alerts:")
+                    for alert in alerts:
+                        st.markdown(f"- {alert}")
+                else:
+                    st.success("✅ No severe weather expected.")
 
             if not project_df.empty:
                 project_df["Weather Delay Risk"] = project_df["Start Date"].apply(
