@@ -505,55 +505,55 @@ if uploaded_files:
                     st.info("No statistically significant correlation detected.")
 
         with tabs[6]:  # Assuming your current last tab is tabs[5], this will be the 7th tab
-    st.header("📈 Executive Summary")
-
-    # Load and process sample historical data exactly as in the provided code:
-    hist_df = load_sample_data()
-    hist_df = calculate_kpis(hist_df)
-    hist_df = calculate_earned_value_metrics(hist_df)
-    hist_df = calculate_productivity(hist_df)
-    summary_df = project_summary(hist_df)
-    summary_df = add_benchmarking_metrics(summary_df)
-    delay_causes = delay_cause_analysis(hist_df)
-
-    st.subheader("Summary Table")
-    st.dataframe(summary_df)
-
-    st.subheader("Recommendations")
-    recs = generate_recommendations(summary_df)
-    for r in recs:
-        st.write(r)
-
-    st.subheader("Narrative Executive Summary")
-    st.write(generate_narrative(summary_df))
-
-    st.subheader("Select Project for Gantt Chart")
-    project_option = st.selectbox("Project:", summary_df['project_id'].unique(), key="exec_proj_select")
-    gantt_img_buf = plot_gantt_chart(hist_df, project_option)
-    st.image(gantt_img_buf)
-
-    st.subheader("Delay Cause Analysis")
-    if delay_causes.empty:
-        st.write("No delays reported across projects.")
-    else:
-        delay_img_buf = plot_delay_causes(delay_causes)
-        st.image(delay_img_buf)
-
-    st.subheader("Cost Variance Waterfall Chart")
-    waterfall_fig = plot_cost_variance_waterfall(summary_df)
-    st.pyplot(waterfall_fig)
-
-    st.subheader("Delay Causes Heatmap")
-    heatmap_fig = plot_delay_heatmap(hist_df)
-    st.pyplot(heatmap_fig)
-
-    # Data validation checks
-    issues = validate_data(hist_df)
-    if issues:
-        for issue in issues:
-            st.warning(issue)
-    else:
-        st.success("Data validation passed")
+            st.header("📈 Executive Summary")
+        
+            # Load and process sample historical data exactly as in the provided code:
+            hist_df = load_sample_data()
+            hist_df = calculate_kpis(hist_df)
+            hist_df = calculate_earned_value_metrics(hist_df)
+            hist_df = calculate_productivity(hist_df)
+            summary_df = project_summary(hist_df)
+            summary_df = add_benchmarking_metrics(summary_df)
+            delay_causes = delay_cause_analysis(hist_df)
+        
+            st.subheader("Summary Table")
+            st.dataframe(summary_df)
+        
+            st.subheader("Recommendations")
+            recs = generate_recommendations(summary_df)
+            for r in recs:
+                st.write(r)
+        
+            st.subheader("Narrative Executive Summary")
+            st.write(generate_narrative(summary_df))
+        
+            st.subheader("Select Project for Gantt Chart")
+            project_option = st.selectbox("Project:", summary_df['project_id'].unique(), key="exec_proj_select")
+            gantt_img_buf = plot_gantt_chart(hist_df, project_option)
+            st.image(gantt_img_buf)
+        
+            st.subheader("Delay Cause Analysis")
+            if delay_causes.empty:
+                st.write("No delays reported across projects.")
+            else:
+                delay_img_buf = plot_delay_causes(delay_causes)
+                st.image(delay_img_buf)
+        
+            st.subheader("Cost Variance Waterfall Chart")
+            waterfall_fig = plot_cost_variance_waterfall(summary_df)
+            st.pyplot(waterfall_fig)
+        
+            st.subheader("Delay Causes Heatmap")
+            heatmap_fig = plot_delay_heatmap(hist_df)
+            st.pyplot(heatmap_fig)
+        
+            # Data validation checks
+            issues = validate_data(hist_df)
+            if issues:
+                for issue in issues:
+                    st.warning(issue)
+            else:
+                st.success("Data validation passed")
 
     if st.button("📄 Generate PDF Analysis Report (Executive Summary)"):
         pdf_buffer = generate_pdf_report(hist_df, summary_df, delay_causes)
@@ -562,4 +562,5 @@ if uploaded_files:
 
 else:
     st.info("Please upload one or more PDF files to begin processing.")
+
 
