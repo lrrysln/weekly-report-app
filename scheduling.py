@@ -27,6 +27,7 @@ API_KEY = "3f5a9ae8a3c7d5c8438e0f4cf4b0b610"  # OpenWeatherMap API Key
 
 @st.cache_resource
 def authenticate_google_drive():
+    """Authenticate with Google Drive using OAuth credentials."""
     creds = None
     if os.path.exists(TOKEN_PICKLE):
         with open(TOKEN_PICKLE, 'rb') as token:
@@ -42,6 +43,7 @@ def authenticate_google_drive():
     return build('drive', 'v3', credentials=creds)
 
 def upload_csv_to_drive(csv_path, file_name, folder_id=None):
+    """Upload a CSV file to Google Drive in the specified folder."""
     service = authenticate_google_drive()
     file_metadata = {'name': file_name, 'mimeType': 'text/csv'}
     if folder_id:
@@ -50,7 +52,11 @@ def upload_csv_to_drive(csv_path, file_name, folder_id=None):
     file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
     return file.get('id')
 
+# ======================
+# PDF Report Generation
+# ======================
 def create_pdf_report(df, critical_df, selected_project, gantt_chart_img_path=None):
+    """Create a PDF report summarizing project activities and critical tasks."""
     output_path = os.path.join(tempfile.gettempdir(),
                                f"Activity_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
     c = canvas.Canvas(output_path, pagesize=letter)
@@ -94,7 +100,11 @@ def create_pdf_report(df, critical_df, selected_project, gantt_chart_img_path=No
     c.save()
     return output_path
 
+# ======================
+# Activity Categorization
+# ======================
 def categorize_activity(name):
+    """Categorize an activity based on keywords in its name."""
     name = name.lower()
     categories = {
         "🏗 Site Work & Earthwork": ["clear", "grade", "trench", "backfill", "earthwork", "site"],
@@ -109,7 +119,11 @@ def categorize_activity(name):
             return label
     return "❓ Uncategorized"
 
+# ======================
+# Weather API Integration
+# ======================
 def get_weather_forecast(location):
+    """Fetch 7-day weather forecast data for a location from OpenWeatherMap."""
     url = f"http://api.openweathermap.org/data/2.5/forecast?q={location}&appid={API_KEY}&units=metric"
     resp = requests.get(url)
     if resp.status_code == 200:
@@ -118,14 +132,21 @@ def get_weather_forecast(location):
     return None
 
 def is_weather_delay(date, forecast_data, rain_threshold=1):
+    """Determine if weather delays are expected on a given date based on rain threshold."""
     for item in forecast_data.get('list', []):
         if datetime.strptime(item['dt_txt'], "%Y-%m-%d %H:%M:%S").date() == date.date():
             if item.get('rain', {}).get('3h', 0) > rain_threshold:
                 return True
     return False
 
-# NEW: Helper function from Step 1
+# ======================
+# Weather Forecast Rendering (with improved dark mode visibility)
+# ======================
 def render_weather_forecast(forecast_data, days=7):
+    """
+    Render 7-day weather forecast as HTML blocks with icons and color alerts.
+    Weather descriptions use a light color (#ccc) for better visibility on dark mode.
+    """
     alerts = []
     today = datetime.utcnow().date()
     future_days = [today + timedelta(days=i) for i in range(days)]
@@ -168,25 +189,32 @@ def render_weather_forecast(forecast_data, days=7):
             alerts.append(f"🧊 Extreme cold expected on {date} (low of {min_temp}°C)")
 
         font_style = f"color:{color}; font-weight:{'bold' if bold else 'normal'}"
+
+        # NOTE: Here we add inline style color:#ccc for weather description for visibility on dark mode
         html_blocks.append(f"""
             <div style="padding:5px 10px; margin:5px; border:1px solid #ccc; border-radius:5px;">
                 <div><strong>{date}</strong> — <span style="{font_style}">{', '.join(set(weather_descs))}</span> {''.join(set(icons))}</div>
-                <div style="font-size: 0.9em;">Temp: {min_temp:.1f}°C to {max_temp:.1f}°C</div>
+                <div style="font-size: 0.9em;">
+                    Temp: {min_temp:.1f}°C to {max_temp:.1f}°C<br>
+                    <span style="color:#ccc;">{', '.join(set(weather_descs))}</span>
+                </div>
             </div>
         """)
 
     return html_blocks, alerts
 
 # ======================
-# Streamlit App
+# Streamlit App UI
 # ======================
 st.set_page_config(page_title="Multi-PDF Activity Extractor", layout="wide")
 st.title("📄 Multi-PDF Activity Extractor & Google Drive Uploader")
 
+# File uploader: multiple PDF files allowed
 uploaded_files = st.file_uploader("Upload one or more PDF files", type="pdf", accept_multiple_files=True)
 
 if uploaded_files:
     all_data, total_skipped = [], []
+    # Loop over each uploaded PDF
     for uploaded_file in uploaded_files:
         pdf_name = os.path.splitext(uploaded_file.name)[0]
         st.info(f"📄 Processing: `{uploaded_file.name}`")
@@ -199,6 +227,7 @@ if uploaded_files:
                 txt = page.extract_text()
                 if txt:
                     text += txt + "\n"
+        # Regex pattern to parse activity lines from the PDF text
         pattern = re.compile(r"^(\S+)\s+(.+?)\s+(\d+)\s+(\d{2}-\d{2}-\d{2})\s+(\d{2}-\d{2}-\d{2})\s+(\d+)\s+(.*)$")
         for line in text.strip().split('\n'):
             m = pattern.match(line.strip())
@@ -218,6 +247,7 @@ if uploaded_files:
                 total_skipped.append({"PDF": uploaded_file.name, "Line": line})
 
     if all_data:
+        # Create dataframe and preprocess dates and flags
         df = pd.DataFrame(all_data)
         df["Start Date"] = pd.to_datetime(df["Start Date"], format="%m-%d-%y", errors="coerce")
         df["Finish Date"] = pd.to_datetime(df["Finish Date"], format="%m-%d-%y", errors="coerce")
@@ -232,21 +262,25 @@ if uploaded_files:
         df["Prev Finish"] = df.groupby("Project Code")["Finish Date"].shift(1)
         df["Out of Sequence"] = df["Start Date"] < df["Prev Finish"]
 
+        # Detect repeated activity IDs
         dup = df["Activity ID"][df["Activity ID"].duplicated(keep=False)]
         repeated_df = df[df["Activity ID"].isin(dup)]
         if not repeated_df.empty:
             repeated_df["Phase"] = repeated_df["Activity Name"].apply(categorize_activity)
             repeated_df.sort_values(by=["Phase", "Activity ID", "Project Code", "Start Date"], inplace=True)
 
+        # Create app tabs
         tabs = st.tabs([
             "📋 Extracted Data", "🔁 Repeated Activities", "📅 Timeline & Insights",
             "📤 Upload Summary", "📄 Reports & Upload"
         ])
 
+        # Tab 1: Raw extracted data
         with tabs[0]:
             st.header("📋 Extracted Data Table")
             st.dataframe(df, use_container_width=True)
 
+        # Tab 2: Repeated activities
         with tabs[1]:
             st.header("🔁 Repeated Activities")
             if not repeated_df.empty:
@@ -259,6 +293,7 @@ if uploaded_files:
             else:
                 st.info("✅ No repeated activities found.")
 
+        # Tab 3: Timeline, weather forecast, and insights
         with tabs[2]:
             st.header("📅 Activity Timeline & Summary Insights")
 
@@ -270,13 +305,22 @@ if uploaded_files:
             project = st.selectbox("Select a project", sorted(df["Project Name"].unique()))
             project_df = df[df["Project Name"] == project].sort_values(by="Start Date")
 
-            # NEW: Updated weather forecast section
+            # Weather forecast input and display
             loc = st.text_input("Enter project location (city name) for 7-day weather forecast")
             forecast_data = get_weather_forecast(loc) if loc else None
 
             if forecast_data:
                 st.subheader(f"🌦 7-Day Weather Forecast for {loc}")
                 html_blocks, alerts = render_weather_forecast(forecast_data)
+
+                # Inject CSS style for weather-description class (optional)
+                st.markdown("""
+                <style>
+                    .weather-description {
+                        color: #ccc;
+                    }
+                </style>
+                """, unsafe_allow_html=True)
 
                 for block in html_blocks:
                     st.markdown(block, unsafe_allow_html=True)
@@ -289,9 +333,11 @@ if uploaded_files:
                     st.success("✅ No severe weather expected.")
 
             if not project_df.empty:
+                # Flag weather delay risk per activity start date
                 project_df["Weather Delay Risk"] = project_df["Start Date"].apply(
                     lambda d: is_weather_delay(d, forecast_data)) if forecast_data else False
 
+                # Render Gantt chart with Altair
                 gantt = alt.Chart(project_df).mark_bar().encode(
                     x='Start Date:T', x2='Finish Date:T',
                     y=alt.Y('Activity Name:N', sort='-x'),
@@ -300,6 +346,7 @@ if uploaded_files:
                 ).properties(width=900, height=400, title=f"Gantt – {project}")
                 st.altair_chart(gantt, use_container_width=True)
 
+                # Float threshold slider to highlight critical tasks
                 float_threshold = st.slider("Highlight tasks with float ≤", 0, 20, 5)
                 critical_df = project_df[project_df["Float"] <= float_threshold]
 
@@ -320,6 +367,7 @@ if uploaded_files:
                 else:
                     st.success("✅ No critical tasks found with the selected float threshold.")
 
+        # Tab 4: Upload extracted CSV data to Google Drive
         with tabs[3]:
             st.header("📤 Upload Extracted Data")
             temp_csv = os.path.join(tempfile.gettempdir(), f"Activity_Data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
@@ -329,15 +377,4 @@ if uploaded_files:
             if st.button("Upload CSV to Google Drive"):
                 try:
                     fid = upload_csv_to_drive(temp_csv, os.path.basename(temp_csv), folder_id=DRIVE_FOLDER_ID)
-                    st.success(f"Uploaded successfully! File ID: {fid}")
-                except Exception as e:
-                    st.error(f"Upload failed: {e}")
-
-        with tabs[4]:
-            st.header("📄 Generate & Download PDF Report")
-            if st.button("Create PDF Summary Report"):
-                pdf_path = create_pdf_report(df, df[df["Float"] <= float_threshold], project, None)
-                with open(pdf_path, "rb") as pdf_file:
-                    st.download_button("⬇️ Download PDF", data=pdf_file.read(), file_name=os.path.basename(pdf_path), mime="application/pdf")
-else:
-    st.info("Upload one or more PDFs to get started.")
+                    st.success(f"Uploaded successfully! File ID:
