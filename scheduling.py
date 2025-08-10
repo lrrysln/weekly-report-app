@@ -96,7 +96,7 @@ uploaded_files = st.file_uploader(
 all_data = []
 
 if uploaded_files:
-    # Simulate extraction process (replace with your actual extraction)
+    # --- REPLACE THIS BLOCK WITH YOUR REAL PDF EXTRACTION LOGIC ---
     for i, pdf_file in enumerate(uploaded_files):
         for line in range(1, 6):  # simulate 5 lines per PDF
             all_data.append({
@@ -114,7 +114,7 @@ if uploaded_files:
     st.header("Extracted Activity Data Preview")
     st.dataframe(df)
 
-    # Download extracted data as CSV
+    # Add download buttons for CSV and Excel
     csv_data = df.to_csv(index=False).encode('utf-8')
     st.download_button(
         label="⬇️ Download extracted data as CSV",
@@ -123,7 +123,6 @@ if uploaded_files:
         mime="text/csv"
     )
 
-    # Download extracted data as Excel
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='Activities')
@@ -136,12 +135,10 @@ if uploaded_files:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-    # Save to DB button
     if st.button("💾 Save extracted data to local database"):
         save_activities_to_db(all_data)
         st.success(f"Saved {len(all_data)} rows to local database!")
 
-    # Combine PDFs button
     if st.button("📎 Combine all uploaded PDFs into one file"):
         merger = PdfMerger()
         for pdf_file in uploaded_files:
