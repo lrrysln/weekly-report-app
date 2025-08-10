@@ -1,512 +1,387 @@
-import streamlit as st
+#!/usr/bin/env python3
+"""
+post_construction_report.py
+
+Generates Post-Construction Performance Reports (Excel + PDF + optional PPTX)
+from a CSV/Excel of project-level data.
+
+Author: ChatGPT (assistant)
+Date: 2025-08-10
+"""
+import argparse
+import os
+import math
+from datetime import datetime
+from collections import Counter, defaultdict
+
 import pandas as pd
-import sqlite3
-from PyPDF2 import PdfMerger
-from datetime import datetime, timedelta
-import io
 import matplotlib.pyplot as plt
-import seaborn as sns
 from fpdf import FPDF
-import tempfile
-from scipy.stats import zscore
-import requests
 
-# === DB Setup and Functions ===
-DB_PATH = 'activities.sqlite'
+# Optional import for PPTX output
+try:
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+    PPTX_AVAILABLE = True
+except Exception:
+    PPTX_AVAILABLE = False
 
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''
-    CREATE TABLE IF NOT EXISTS activities (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        project_code TEXT,
-        project_name TEXT,
-        activity_id TEXT,
-        activity_name TEXT,
-        duration INTEGER,
-        start_date TEXT,
-        finish_date TEXT,
-        float INTEGER,
-        notes TEXT
-    )
-    ''')
-    conn.commit()
-    conn.close()
+# ---------- Helper functions ----------
+def parse_dates(df, cols):
+    for c in cols:
+        if c in df.columns:
+            df[c] = pd.to_datetime(df[c], errors='coerce')
+    return df
 
-def save_activities_to_db(data):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    for row in data:
-        c.execute('''
-        INSERT INTO activities (project_code, project_name, activity_id, activity_name, duration, start_date, finish_date, float, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            row.get('Project Code'),
-            row.get('Project Name'),
-            row.get('Activity ID'),
-            row.get('Activity Name'),
-            row.get('Duration'),
-            row['Start Date'].strftime('%Y-%m-%d') if row.get('Start Date') else None,
-            row['Finish Date'].strftime('%Y-%m-%d') if row.get('Finish Date') else None,
-            row.get('Float'),
-            row.get('Notes')
-        ))
-    conn.commit()
-    conn.close()
+def safe_div(a, b):
+    try:
+        if pd.isna(a) or pd.isna(b): return None
+        if b == 0: return None
+        return a / b
+    except Exception:
+        return None
 
-def load_activities_from_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('SELECT project_code, project_name, activity_id, activity_name, duration, start_date, finish_date, float, notes FROM activities')
-    rows = c.fetchall()
-    conn.close()
-    data = []
-    for r in rows:
-        data.append({
-            "Project Code": r[0],
-            "Project Name": r[1],
-            "Activity ID": r[2],
-            "Activity Name": r[3],
-            "Duration": r[4],
-            "Start Date": pd.to_datetime(r[5]) if r[5] else None,
-            "Finish Date": pd.to_datetime(r[6]) if r[6] else None,
-            "Float": r[7],
-            "Notes": r[8]
+def compute_duration_days(start, finish):
+    if pd.isna(start) or pd.isna(finish):
+        return None
+    return (finish - start).days
+
+def normalize_delay_causes(series):
+    """Return a list of cleaned delay cause lists per row."""
+    result = []
+    for val in series.fillna(''):
+        if not val:
+            result.append([])
+        else:
+            # split on ; or , and strip, lower
+            parts = [p.strip().lower() for p in (str(val).replace(',', ';').split(';')) if p.strip()]
+            result.append(parts)
+    return result
+
+# ---------- KPI calculations ----------
+def compute_project_kpis(df):
+    """Compute per-project KPIs and append as columns; return kpi_df."""
+    kpis = []
+    delay_lists = normalize_delay_causes(df.get('delay_causes', pd.Series(['']*len(df))))
+    for idx, row in df.iterrows():
+        planned_start = row.get('planned_start')
+        planned_finish = row.get('planned_finish')
+        actual_start = row.get('actual_start')
+        actual_finish = row.get('actual_finish')
+        planned_cost = row.get('planned_cost')
+        actual_cost = row.get('actual_cost')
+        area = row.get('area_sqft')
+
+        planned_duration = compute_duration_days(planned_start, planned_finish)
+        actual_duration = compute_duration_days(actual_start, actual_finish)
+        schedule_variance_days = None if planned_duration is None or actual_duration is None else actual_duration - planned_duration
+        schedule_variance_pct = None
+        if planned_duration and planned_duration != 0 and schedule_variance_days is not None:
+            schedule_variance_pct = (actual_duration - planned_duration) / planned_duration * 100
+
+        cost_variance = None if pd.isna(planned_cost) or pd.isna(actual_cost) else actual_cost - planned_cost
+        cost_variance_pct = None
+        if planned_cost and planned_cost != 0 and not pd.isna(cost_variance):
+            cost_variance_pct = cost_variance / planned_cost * 100
+
+        # EVM / CPI (simple)
+        if 'earned_value' in row and not pd.isna(row.get('earned_value')) and not pd.isna(actual_cost):
+            ev = row.get('earned_value')
+            ac = actual_cost
+            cpi = safe_div(ev, ac)
+        elif not pd.isna(row.get('percent_complete')) and not pd.isna(planned_cost) and not pd.isna(actual_cost):
+            ev = row.get('percent_complete') / 100.0 * planned_cost
+            ac = actual_cost
+            cpi = safe_div(ev, ac)
+        else:
+            cpi = None
+
+        cost_per_sqft = None
+        if area and not pd.isna(actual_cost) and area != 0:
+            cost_per_sqft = actual_cost / area
+
+        kpis.append({
+            'project_id': row.get('project_id'),
+            'project_name': row.get('project_name'),
+            'asset_type': row.get('asset_type'),
+            'planned_duration_days': planned_duration,
+            'actual_duration_days': actual_duration,
+            'schedule_variance_days': schedule_variance_days,
+            'schedule_variance_pct': schedule_variance_pct,
+            'planned_cost': planned_cost,
+            'actual_cost': actual_cost,
+            'cost_variance': cost_variance,
+            'cost_variance_pct': cost_variance_pct,
+            'CPI': cpi,
+            'cost_per_sqft': cost_per_sqft,
+            'safety_incidents': row.get('safety_incidents', 0),
+            'contractor': row.get('contractor'),
+            'weather_delay_days': row.get('weather_delay_days', 0),
+            'defects_count': row.get('defects_count', 0),
+            'warranty_claims': row.get('warranty_claims', 0),
+            'critical_path_changes': row.get('critical_path_changes', 0),
+            'delay_causes_list': delay_lists[idx],
         })
-    return data
+    return pd.DataFrame(kpis)
 
-# === Duplicate Entry Detection ===
-def find_duplicates(df):
-    # Consider duplicate if same project_code + activity_id + activity_name + start_date + finish_date
-    duplicates = df[df.duplicated(subset=['Project Code', 'Activity ID', 'Activity Name', 'Start Date', 'Finish Date'], keep=False)]
-    return duplicates.sort_values(['Project Code', 'Activity ID'])
+def aggregate_portfolio_kpis(kpi_df):
+    """Return a dict of portfolio-level KPIs."""
+    res = {}
+    count = len(kpi_df)
+    res['project_count'] = count
+    if count == 0:
+        return res
 
-# === Weather Forecasting ===
-def get_weather_forecast(city='New York'):
-    # Using a free API example: Open-Meteo or similar (No key needed)
-    # For demo, a fake static forecast
-    # You can replace with real API calls with your API key
-    forecast = [
-        {"date": datetime.now() + timedelta(days=i), "temp_c": 20 + i, "condition": "Sunny" if i % 2 == 0 else "Cloudy"}
-        for i in range(7)
-    ]
-    return forecast
+    # averages
+    res['avg_planned_duration'] = pd.Series(kpi_df['planned_duration_days']).dropna().mean()
+    res['avg_actual_duration'] = pd.Series(kpi_df['actual_duration_days']).dropna().mean()
+    res['median_schedule_variance_days'] = pd.Series(kpi_df['schedule_variance_days']).dropna().median()
+    res['avg_schedule_variance_pct'] = pd.Series(kpi_df['schedule_variance_pct']).dropna().mean()
+    res['avg_cost_variance_pct'] = pd.Series(kpi_df['cost_variance_pct']).dropna().mean()
+    res['avg_CPI'] = pd.Series(kpi_df['CPI']).dropna().mean()
+    res['avg_cost_per_sqft'] = pd.Series(kpi_df['cost_per_sqft']).dropna().mean()
+    res['total_safety_incidents'] = int(pd.Series(kpi_df['safety_incidents']).fillna(0).sum())
+    res['avg_weather_delay_days'] = pd.Series(kpi_df['weather_delay_days']).dropna().mean()
+    res['avg_critical_path_changes'] = pd.Series(kpi_df['critical_path_changes']).dropna().mean()
+    return res
 
-# === Historical Data & Analysis Functions ===
-def load_sample_data():
-    data = [
-        ['ProjectA', 'Foundation', '2025-01-01', '2025-01-10', '2025-01-01', '2025-01-12', None, 100, 5000],
-        ['ProjectA', 'Framing', '2025-01-11', '2025-01-25', '2025-01-13', '2025-01-28', 'Weather', 200, 12000],
-        ['ProjectA', 'Finishes', '2025-01-26', '2025-02-10', '2025-01-29', '2025-02-08', None, 150, 8000],
-        ['ProjectB', 'Foundation', '2025-02-01', '2025-02-12', '2025-02-02', '2025-02-14', 'Material Delay', 110, 5200],
-        ['ProjectB', 'Framing', '2025-02-13', '2025-02-28', '2025-02-15', '2025-03-05', 'Labor Shortage', 210, 12500],
-        ['ProjectB', 'Finishes', '2025-03-01', '2025-03-15', '2025-03-06', '2025-03-16', None, 160, 9000],
-    ]
-    df = pd.DataFrame(data, columns=['project_id', 'activity', 'planned_start', 'planned_end', 'actual_start', 'actual_end', 'delay_reason', 'labor_hours', 'cost'])
-    for col in ['planned_start', 'planned_end', 'actual_start', 'actual_end']:
-        df[col] = pd.to_datetime(df[col])
-    return df
+def compute_delay_cause_breakdown(kpi_df):
+    cnt = Counter()
+    for lst in kpi_df['delay_causes_list'].fillna([]):
+        cnt.update(lst)
+    # return as sorted DataFrame
+    items = sorted(cnt.items(), key=lambda x: x[1], reverse=True)
+    return pd.DataFrame(items, columns=['cause', 'count'])
 
-def calculate_kpis(df):
-    df['planned_duration'] = (df['planned_end'] - df['planned_start']).dt.days
-    df['actual_duration'] = (df['actual_end'] - df['actual_start']).dt.days
-    df['schedule_variance'] = df['planned_duration'] - df['actual_duration']
-    df['spi'] = df['planned_duration'] / df['actual_duration']
-    df['delay_days'] = (df['actual_end'] - df['planned_end']).dt.days.clip(lower=0)
-    return df
+def contractor_scorecard(kpi_df):
+    # For each contractor compute avg schedule variance pct, avg cost variance pct, projects, safety incidents
+    groups = kpi_df.groupby('contractor', dropna=True)
+    rows = []
+    for name, g in groups:
+        rows.append({
+            'contractor': name,
+            'projects': len(g),
+            'avg_schedule_variance_pct': g['schedule_variance_pct'].dropna().mean(),
+            'avg_cost_variance_pct': g['cost_variance_pct'].dropna().mean(),
+            'total_safety_incidents': int(g['safety_incidents'].fillna(0).sum()),
+            'avg_CPI': g['CPI'].dropna().mean()
+        })
+    return pd.DataFrame(rows).sort_values('projects', ascending=False)
 
-def calculate_earned_value_metrics(df):
-    df['BAC'] = df['cost']  # budget at completion per activity
-    df['pct_complete'] = (df['actual_duration'] / df['planned_duration']).clip(upper=1)
-    df['PV'] = df['planned_duration'] / df['planned_duration'].sum() * df['cost'].sum()
-    df['EV'] = df['pct_complete'] * df['BAC']
-    df['AC'] = df['cost']  # assumed equal to cost here
-    df['CPI'] = df['EV'] / df['AC']
-    df['SPI'] = df['EV'] / df['PV']
-    return df
+# ---------- Reporting ----------
+def save_excel(output_path, raw_df, kpi_df, portfolio_kpis, delay_df, contractor_df):
+    with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+        raw_df.to_excel(writer, sheet_name='raw_data', index=False)
+        kpi_df.to_excel(writer, sheet_name='per_project_kpis', index=False)
+        delay_df.to_excel(writer, sheet_name='delay_causes', index=False)
+        contractor_df.to_excel(writer, sheet_name='contractor_scorecard', index=False)
+        # Portfolio: write summary as a single-row DF
+        pd.DataFrame([portfolio_kpis]).to_excel(writer, sheet_name='portfolio_summary', index=False)
 
-def identify_critical_path(df):
-    critical_activities = df[df['float'] == 0] if 'float' in df.columns else pd.DataFrame()
-    return critical_activities
+def create_charts(outdir, kpi_df, delay_df):
+    charts = {}
+    # Duration comparison chart (planned vs actual)
+    try:
+        small = kpi_df[['project_name','planned_duration_days','actual_duration_days']].dropna(subset=['project_name'])
+        small = small.sort_values('planned_duration_days', na_position='last').head(15)
+        fig, ax = plt.subplots(figsize=(8, max(4, len(small)*0.4)))
+        idx = range(len(small))
+        ax.barh(idx, small['planned_duration_days'].fillna(0), label='Planned')
+        ax.barh(idx, small['actual_duration_days'].fillna(0), left=small['planned_duration_days'].fillna(0), label='Actual (stacked)')
+        ax.set_yticks(idx)
+        ax.set_yticklabels(small['project_name'])
+        ax.set_xlabel('Days')
+        ax.set_title('Planned vs Actual Duration (sample)')
+        ax.legend()
+        plt.tight_layout()
+        p1 = os.path.join(outdir, 'chart_duration.png')
+        fig.savefig(p1, dpi=150)
+        plt.close(fig)
+        charts['duration'] = p1
+    except Exception as e:
+        print("Could not create duration chart:", e)
 
-def calculate_productivity(df):
-    df['labor_per_unit'] = df['labor_hours'] / df['actual_duration']
-    return df
+    # Cost variance chart
+    try:
+        small = kpi_df[['project_name','cost_variance_pct']].dropna().sort_values('cost_variance_pct', ascending=False).head(20)
+        fig, ax = plt.subplots(figsize=(8, max(3, len(small)*0.35)))
+        ax.barh(range(len(small)), small['cost_variance_pct'])
+        ax.set_yticks(range(len(small)))
+        ax.set_yticklabels(small['project_name'])
+        ax.set_xlabel('Cost variance %')
+        ax.set_title('Top Cost Variances (%)')
+        plt.tight_layout()
+        p2 = os.path.join(outdir, 'chart_cost_variance.png')
+        fig.savefig(p2, dpi=150)
+        plt.close(fig)
+        charts['cost_variance'] = p2
+    except Exception as e:
+        print("Could not create cost variance chart:", e)
 
-def project_summary(df):
-    summary = df.groupby('project_id').agg(
-        total_planned_duration=('planned_duration', 'sum'),
-        total_actual_duration=('actual_duration', 'sum'),
-        total_labor_hours=('labor_hours', 'sum'),
-        total_cost=('cost', 'sum'),
-        avg_spi=('spi', 'mean'),
-        total_delay_days=('delay_days', 'sum')
-    ).reset_index()
-    summary['schedule_variance'] = summary['total_planned_duration'] - summary['total_actual_duration']
-    return summary
+    # Delay causes pie
+    try:
+        if not delay_df.empty:
+            fig, ax = plt.subplots(figsize=(6,6))
+            ax.pie(delay_df['count'], labels=delay_df['cause'], autopct='%1.1f%%', startangle=140)
+            ax.set_title('Delay Cause Breakdown')
+            plt.tight_layout()
+            p3 = os.path.join(outdir, 'chart_delay_causes.png')
+            fig.savefig(p3, dpi=150)
+            plt.close(fig)
+            charts['delay_pie'] = p3
+    except Exception as e:
+        print("Could not create delay causes chart:", e)
 
-def add_benchmarking_metrics(summary_df):
-    summary_df['cost_zscore'] = zscore(summary_df['total_cost'])
-    summary_df['spi_zscore'] = zscore(summary_df['avg_spi'])
-    summary_df['cost_percentile'] = summary_df['total_cost'].rank(pct=True)
-    summary_df['spi_percentile'] = summary_df['avg_spi'].rank(pct=True)
-    return summary_df
+    return charts
 
-def generate_recommendations(summary_df):
-    recommendations = []
-    for _, row in summary_df.iterrows():
-        rec = f"Project {row['project_id']}: "
-        if row['avg_spi'] < 1:
-            rec += "Schedule behind — consider accelerating critical tasks. "
-        if row['total_cost'] > summary_df['total_cost'].mean():
-            rec += "Cost over budget — review expense controls. "
-        recommendations.append(rec)
-    return recommendations
-
-def plot_gantt_chart(df, project_id):
-    project_df = df[df['project_id'] == project_id]
-    if project_df.empty:
-        return None
-    fig, ax = plt.subplots(figsize=(10, 3))
-    y_pos = range(len(project_df))
-    ax.barh(y_pos, project_df['planned_duration'], left=project_df['planned_start'].map(lambda d: d.toordinal()), color='lightblue', label='Planned')
-    ax.barh(y_pos, project_df['actual_duration'], left=project_df['actual_start'].map(lambda d: d.toordinal()), color='orange', alpha=0.6, label='Actual')
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(project_df['activity'])
-    x_ticks = ax.get_xticks()
-    x_labels = [datetime.fromordinal(int(tick)).strftime('%Y-%m-%d') for tick in x_ticks]
-    ax.set_xticklabels(x_labels, rotation=45, ha='right')
-    ax.set_title(f'Gantt Chart for {project_id}')
-    ax.legend()
-    plt.tight_layout()
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png')
-    plt.close(fig)
-    buf.seek(0)
-    return buf
-
-def delay_cause_analysis(df):
-    delays = df[df['delay_days'] > 0]
-    cause_counts = delays['delay_reason'].value_counts().reset_index()
-    cause_counts.columns = ['delay_reason', 'count']
-    return cause_counts
-
-def plot_delay_causes(cause_counts):
-    if cause_counts.empty:
-        return None
-    fig, ax = plt.subplots()
-    sns.barplot(x='count', y='delay_reason', data=cause_counts, ax=ax)
-    ax.set_title('Delay Causes Frequency')
-    plt.tight_layout()
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png')
-    plt.close(fig)
-    buf.seek(0)
-    return buf
-
-def plot_cost_variance_waterfall(summary_df):
-    diffs = summary_df['total_cost'] - (summary_df['total_planned_duration'] * (summary_df['total_cost'] / summary_df['total_planned_duration']))
-    fig, ax = plt.subplots()
-    colors = ['red' if x > 0 else 'green' for x in diffs]
-    ax.bar(summary_df['project_id'], diffs, color=colors)
-    ax.set_title('Cost Variance Waterfall')
-    return fig
-
-def plot_delay_heatmap(df):
-    delay_matrix = pd.crosstab(df['activity'], df['delay_reason'])
-    fig, ax = plt.subplots(figsize=(10,6))
-    sns.heatmap(delay_matrix, annot=True, fmt='d', cmap='Reds', ax=ax)
-    ax.set_title('Delay Causes Heatmap')
-    return fig
-
-def validate_data(df):
-    issues = []
-    if (df['actual_end'] < df['actual_start']).any():
-        issues.append("Actual end date before start date found.")
-    if (df['planned_end'] < df['planned_start']).any():
-        issues.append("Planned end date before start date found.")
-    if (df[['cost', 'labor_hours', 'actual_duration']] < 0).any().any():
-        issues.append("Negative values detected in cost/labor/duration.")
-    return issues
-
-def generate_narrative(summary_df):
-    narrative = ""
-    for _, row in summary_df.iterrows():
-        narrative += f"Project {row['project_id']} has an average schedule performance index of {row['avg_spi']:.2f}, "
-        if row['avg_spi'] < 1:
-            narrative += "indicating it is behind schedule. "
-        else:
-            narrative += "indicating it is on or ahead of schedule. "
-    return narrative
-
-# PDF report generation class and function
-class PDFReport(FPDF):
-    def header(self):
-        self.set_font('Arial', 'B', 16)
-        self.cell(0, 10, 'Construction Project Analysis Report', 0, 1, 'C')
-        self.ln(10)
-    def chapter_title(self, title):
-        self.set_font('Arial', 'B', 14)
-        self.cell(0, 10, title, 0, 1)
-        self.ln(4)
-    def chapter_body(self, text):
-        self.set_font('Arial', '', 12)
-        self.multi_cell(0, 10, text)
-        self.ln(5)
-    def add_image(self, img_buffer, w=180):
-        with tempfile.NamedTemporaryFile(delete=True, suffix=".png") as tmpfile:
-            tmpfile.write(img_buffer.getbuffer())
-            tmpfile.flush()
-            self.image(tmpfile.name, w=w)
-            self.ln(10)
-
-def generate_pdf_report(df, summary_df, delay_causes):
-    pdf = PDFReport()
+def create_pdf_summary(pdf_path, portfolio_kpis, charts, top_projects_df):
+    pdf = FPDF(orientation='P', unit='mm', format='A4')
+    pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
-    pdf.chapter_title('Project Summary')
-    for _, row in summary_df.iterrows():
-        txt = (f"Project: {row['project_id']}\n"
-               f"Planned Duration: {row['total_planned_duration']} days\n"
-               f"Actual Duration: {row['total_actual_duration']} days\n"
-               f"Schedule Variance: {row['schedule_variance']} days\n"
-               f"Average SPI: {row['avg_spi']:.2f}\n"
-               f"Total Labor Hours: {row['total_labor_hours']}\n"
-               f"Total Cost: ${row['total_cost']}\n"
-               f"Total Delay Days: {row['total_delay_days']}\n")
-        pdf.chapter_body(txt)
-        gantt_img = plot_gantt_chart(df, row['project_id'])
-        if gantt_img:
-            pdf.add_image(gantt_img)
-    pdf.chapter_title('Delay Cause Analysis')
-    if delay_causes.empty:
-        pdf.chapter_body("No delays reported across projects.")
-    else:
-        pdf.chapter_body("Frequency of delay causes across projects:")
-        delay_img = plot_delay_causes(delay_causes)
-        if delay_img:
-            pdf.add_image(delay_img)
-    pdf_output = io.BytesIO()
-    pdf.output(pdf_output)
-    pdf_output.seek(0)
-    return pdf_output
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 8, "Post-Construction Executive Summary", ln=True)
+    pdf.ln(2)
 
-# === Streamlit App UI ===
+    pdf.set_font("Arial", size=11)
+    # key KPIs
+    pdf.cell(0, 6, f"Projects analyzed: {portfolio_kpis.get('project_count', 0)}", ln=True)
+    pdf.cell(0, 6, f"Avg planned duration (days): {format_number(portfolio_kpis.get('avg_planned_duration'))}", ln=True)
+    pdf.cell(0, 6, f"Avg actual duration (days): {format_number(portfolio_kpis.get('avg_actual_duration'))}", ln=True)
+    pdf.cell(0, 6, f"Median schedule variance (days): {format_number(portfolio_kpis.get('median_schedule_variance_days'))}", ln=True)
+    pdf.cell(0, 6, f"Avg schedule variance (%): {format_percent(portfolio_kpis.get('avg_schedule_variance_pct'))}", ln=True)
+    pdf.cell(0, 6, f"Avg cost variance (%): {format_percent(portfolio_kpis.get('avg_cost_variance_pct'))}", ln=True)
+    pdf.cell(0, 6, f"Avg CPI: {format_number(portfolio_kpis.get('avg_CPI'))}", ln=True)
+    pdf.ln(4)
 
+    # charts
+    x = 0
+    for key in ('duration', 'cost_variance', 'delay_pie'):
+        if charts.get(key) and os.path.exists(charts[key]):
+            try:
+                # embed image scaled
+                pdf.image(charts[key], w=180)
+                pdf.ln(4)
+            except Exception as e:
+                print("Could not embed chart in PDF:", e)
+
+    # Top projects snippet
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 6, "Top Projects (by cost variance % / schedule variance):", ln=True)
+    pdf.set_font("Arial", size=10)
+    if not top_projects_df.empty:
+        for _, r in top_projects_df.head(6).iterrows():
+            name = r.get('project_name', 'n/a')[:50]
+            scv = format_percent(r.get('schedule_variance_pct'))
+            ccv = format_percent(r.get('cost_variance_pct'))
+            pdf.multi_cell(0, 5, f"• {name} — Schedule var: {scv}, Cost var: {ccv}")
+    pdf.ln(3)
+    pdf.set_font("Arial", size=8)
+    pdf.cell(0, 6, f"Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}", ln=True)
+
+    pdf.output(pdf_path)
+    print("Saved PDF:", pdf_path)
+
+def format_number(x):
+    if x is None or (isinstance(x, float) and math.isnan(x)): return "n/a"
+    if isinstance(x, float): return f"{x:,.2f}"
+    return str(x)
+
+def format_percent(x):
+    if x is None or (isinstance(x, float) and math.isnan(x)): return "n/a"
+    return f"{x:.1f}%"
+
+def create_pptx(pptx_path, kpi_df, charts, portfolio_kpis):
+    if not PPTX_AVAILABLE:
+        print("python-pptx not available — skipping PPTX creation.")
+        return
+    prs = Presentation()
+    # Title slide
+    s = prs.slides.add_slide(prs.slide_layouts[0])
+    title = s.shapes.title
+    subtitle = s.placeholders[1]
+    title.text = "Post-Construction Performance Report"
+    subtitle.text = f"Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+
+    # Portfolio summary slide
+    s2 = prs.slides.add_slide(prs.slide_layouts[5])
+    title = s2.shapes.title
+    title.text = "Portfolio Summary"
+    tf = s2.shapes.placeholders[1].text_frame
+    tf.text = f"Projects: {portfolio_kpis.get('project_count',0)}"
+    p = tf.add_paragraph()
+    p.text = f"Avg schedule variance (%): {format_percent(portfolio_kpis.get('avg_schedule_variance_pct'))}"
+
+    # Charts slide(s)
+    for key in charts:
+        if os.path.exists(charts[key]):
+            slide = prs.slides.add_slide(prs.slide_layouts[5])
+            slide.shapes.title.text = key.replace('_',' ').title()
+            left = Inches(0.5); top = Inches(1.2); width = Inches(9)
+            slide.shapes.add_picture(charts[key], left, top, width=width)
+
+    # Add a few project detail slides
+    for i, row in kpi_df.head(10).iterrows():
+        slide = prs.slides.add_slide(prs.slide_layouts[5])
+        slide.shapes.title.text = row.get('project_name') or str(row.get('project_id'))
+        body = slide.shapes.placeholders[1].text_frame
+        body.text = f"Planned dur: {row.get('planned_duration_days')} days"
+        body.add_paragraph().text = f"Actual dur: {row.get('actual_duration_days')} days"
+        body.add_paragraph().text = f"Schedule var (%): {format_percent(row.get('schedule_variance_pct'))}"
+        body.add_paragraph().text = f"Cost var (%): {format_percent(row.get('cost_variance_pct'))}"
+        body.add_paragraph().text = f"CPI: {format_number(row.get('CPI'))}"
+    prs.save(pptx_path)
+    print("Saved PPTX:", pptx_path)
+
+# ---------- CLI ----------
 def main():
-    st.title("📄 Construction Project Schedule Manager & Analysis")
+    parser = argparse.ArgumentParser(description="Post-Construction Performance Report generator")
+    parser.add_argument('--input', '-i', required=True, help="Input CSV or Excel with project rows")
+    parser.add_argument('--outdir', '-o', default='reports', help="Output directory")
+    parser.add_argument('--pptx', action='store_true', help="Also create a PowerPoint (requires python-pptx)")
+    args = parser.parse_args()
 
-    # Initialize DB
-    init_db()
+    os.makedirs(args.outdir, exist_ok=True)
+    # Load data
+    ext = os.path.splitext(args.input)[1].lower()
+    if ext in ('.xlsx', '.xls'):
+        raw = pd.read_excel(args.input)
+    else:
+        raw = pd.read_csv(args.input)
 
-    # Tabs for different sections
-    tabs = st.tabs([
-        "1. PDF Upload & Extraction",
-        "2. Stored Activities",
-        "3. Duplicate Entry Check",
-        "4. Weather Forecast",
-        "5. Advanced KPIs & Diagnostics",
-        "6. Executive Summary"
-    ])
+    # Standardize column names (lower)
+    raw.columns = [c.strip() for c in raw.columns]
+    # parse dates
+    raw = parse_dates(raw, ['planned_start','planned_finish','actual_start','actual_finish'])
 
-    # === Tab 1: PDF Upload & Extraction ===
-    with tabs[0]:
-        st.header("Upload Project Schedule PDFs")
-        uploaded_files = st.file_uploader(
-            "Upload one or more project schedule PDFs",
-            type=['pdf'],
-            accept_multiple_files=True
-        )
+    # compute KPIs
+    kpi_df = compute_project_kpis(raw)
+    portfolio_kpis = aggregate_portfolio_kpis(kpi_df)
+    delay_df = compute_delay_cause_breakdown(kpi_df)
+    contractor_df = contractor_scorecard(kpi_df)
 
-        all_data = []
+    # Save Excel
+    timestamp = datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+    excel_path = os.path.join(args.outdir, f"post_construction_report_{timestamp}.xlsx")
+    save_excel(excel_path, raw, kpi_df, portfolio_kpis, delay_df, contractor_df)
+    print("Saved Excel:", excel_path)
 
-        if uploaded_files:
-            # Mock extraction from PDFs (replace with real extraction logic)
-            for i, pdf_file in enumerate(uploaded_files):
-                for line in range(1, 6):
-                    all_data.append({
-                        "Project Code": f"PC-{i+1}",
-                        "Project Name": f"Project {i+1}",
-                        "Activity ID": f"A{i+1}-{line}",
-                        "Activity Name": f"Activity {line} from PDF {pdf_file.name}",
-                        "Duration": 5 + line,
-                        "Start Date": pd.Timestamp("2025-01-01") + pd.Timedelta(days=line),
-                        "Finish Date": pd.Timestamp("2025-01-06") + pd.Timedelta(days=line),
-                        "Float": 0,
-                        "Notes": None
-                    })
-            df = pd.DataFrame(all_data)
-            st.header("Extracted Activity Data Preview")
-            st.dataframe(df)
+    # Create charts
+    charts = create_charts(args.outdir, kpi_df, delay_df)
 
-            # Download extracted CSV & Excel
-            csv_data = df.to_csv(index=False).encode('utf-8')
-            st.download_button("⬇️ Download extracted data as CSV", csv_data, "extracted_activities.csv", "text/csv")
+    # PDF executive summary
+    pdf_path = os.path.join(args.outdir, f"executive_summary_{timestamp}.pdf")
+    # Determine "top projects" by cost variance magnitude
+    top_projects = kpi_df.copy()
+    top_projects['abs_cost_var_pct'] = top_projects['cost_variance_pct'].abs().fillna(0)
+    top_projects_sorted = top_projects.sort_values(['abs_cost_var_pct','schedule_variance_pct'], ascending=[False, False])
+    create_pdf_summary(pdf_path, portfolio_kpis, charts, top_projects_sorted)
 
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df.to_excel(writer, index=False, sheet_name='Activities')
-            processed_data = output.getvalue()
-            st.download_button("⬇️ Download extracted data as Excel", processed_data, "extracted_activities.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    # optional PPTX
+    if args.pptx:
+        pptx_path = os.path.join(args.outdir, f"post_construction_report_{timestamp}.pptx")
+        create_pptx(pptx_path, kpi_df, charts, portfolio_kpis)
 
-            if st.button("💾 Save extracted data to local database"):
-                save_activities_to_db(all_data)
-                st.success(f"Saved {len(all_data)} rows to local database!")
+    print("Done. Outputs in:", os.path.abspath(args.outdir))
 
-            if st.button("📎 Combine all uploaded PDFs into one file"):
-                merger = PdfMerger()
-                for pdf_file in uploaded_files:
-                    pdf_file.seek(0)
-                    merger.append(pdf_file)
-                combined_pdf_path = f"combined_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-                merger.write(combined_pdf_path)
-                merger.close()
-                with open(combined_pdf_path, "rb") as f:
-                    st.download_button("⬇️ Download Combined PDF", f, combined_pdf_path, "application/pdf")
-                st.success("Combined PDF ready for download!")
-        else:
-            st.info("Upload PDFs to extract and store project activity data.")
-
-    # === Tab 2: Stored Activities ===
-    with tabs[1]:
-        st.header("📂 Previously Stored Activities")
-        stored_data = load_activities_from_db()
-        if stored_data:
-            stored_df = pd.DataFrame(stored_data)
-            st.dataframe(stored_df)
-        else:
-            st.info("No stored data found in local database yet.")
-
-    # === Tab 3: Duplicate Entry Check ===
-    with tabs[2]:
-        st.header("🔍 Duplicate Entry Detection")
-        stored_data = load_activities_from_db()
-        if stored_data:
-            df_stored = pd.DataFrame(stored_data)
-            duplicates = find_duplicates(df_stored)
-            if not duplicates.empty:
-                st.warning(f"Found {len(duplicates)} duplicate entries:")
-                st.dataframe(duplicates)
-            else:
-                st.success("No duplicate entries found.")
-        else:
-            st.info("No data in the database to check for duplicates.")
-
-    # === Tab 4: Weather Forecast ===
-    with tabs[3]:
-        st.header("🌤️ Weather Forecast")
-        city = st.text_input("Enter city for weather forecast:", value="New York")
-        forecast = get_weather_forecast(city)
-        for day in forecast:
-            st.write(f"{day['date'].strftime('%Y-%m-%d')}: {day['temp_c']} °C, {day['condition']}")
-
-    # === Tab 5: Advanced KPIs & Diagnostics ===
-    with tabs[4]:
-        st.header("📈 Advanced KPIs & Diagnostics")
-
-        hist_df = load_sample_data()
-        hist_df = calculate_kpis(hist_df)
-        hist_df = calculate_earned_value_metrics(hist_df)
-        hist_df = calculate_productivity(hist_df)
-        summary_df = project_summary(hist_df)
-        summary_df = add_benchmarking_metrics(summary_df)
-        delay_causes = delay_cause_analysis(hist_df)
-
-        st.subheader("Summary Table")
-        st.dataframe(summary_df)
-
-        st.subheader("Recommendations")
-        recs = generate_recommendations(summary_df)
-        for r in recs:
-            st.write(r)
-
-        st.subheader("Narrative Executive Summary")
-        st.write(generate_narrative(summary_df))
-
-        st.subheader("Select Project for Gantt Chart")
-        project_option = st.selectbox("Project:", summary_df['project_id'].unique())
-        gantt_img_buf = plot_gantt_chart(hist_df, project_option)
-        if gantt_img_buf:
-            st.image(gantt_img_buf)
-
-        st.subheader("Delay Cause Analysis")
-        if delay_causes.empty:
-            st.write("No delays reported across projects.")
-        else:
-            delay_img_buf = plot_delay_causes(delay_causes)
-            if delay_img_buf:
-                st.image(delay_img_buf)
-
-        st.subheader("Cost Variance Waterfall Chart")
-        waterfall_fig = plot_cost_variance_waterfall(summary_df)
-        st.pyplot(waterfall_fig)
-
-        st.subheader("Delay Causes Heatmap")
-        heatmap_fig = plot_delay_heatmap(hist_df)
-        st.pyplot(heatmap_fig)
-
-        issues = validate_data(hist_df)
-        if issues:
-            for issue in issues:
-                st.warning(issue)
-        else:
-            st.success("Data validation passed")
-
-    # === Tab 6: Executive Summary ===
-    with tabs[5]:
-        st.header("📝 Executive Summary & Full Analysis")
-
-        # Use same sample data from advanced KPIs tab
-        hist_df = load_sample_data()
-        hist_df = calculate_kpis(hist_df)
-        hist_df = calculate_earned_value_metrics(hist_df)
-        hist_df = calculate_productivity(hist_df)
-        summary_df = project_summary(hist_df)
-        delay_causes = delay_cause_analysis(hist_df)
-
-        st.subheader("Summary Table")
-        st.dataframe(summary_df)
-
-        st.subheader("Recommendations")
-        recs = generate_recommendations(summary_df)
-        for r in recs:
-            st.write(r)
-
-        st.subheader("Narrative Executive Summary")
-        st.write(generate_narrative(summary_df))
-
-        st.subheader("Select Project for Gantt Chart")
-        project_option = st.selectbox("Project (Executive Summary):", summary_df['project_id'].unique(), key="exec_proj_select")
-        gantt_img_buf = plot_gantt_chart(hist_df, project_option)
-        if gantt_img_buf:
-            st.image(gantt_img_buf)
-
-        st.subheader("Delay Cause Analysis")
-        if delay_causes.empty:
-            st.write("No delays reported across projects.")
-        else:
-            delay_img_buf = plot_delay_causes(delay_causes)
-            if delay_img_buf:
-                st.image(delay_img_buf)
-
-        st.subheader("Cost Variance Waterfall Chart")
-        waterfall_fig = plot_cost_variance_waterfall(summary_df)
-        st.pyplot(waterfall_fig)
-
-        st.subheader("Delay Causes Heatmap")
-        heatmap_fig = plot_delay_heatmap(hist_df)
-        st.pyplot(heatmap_fig)
-
-        issues = validate_data(hist_df)
-        if issues:
-            for issue in issues:
-                st.warning(issue)
-        else:
-            st.success("Data validation passed")
-
-        if st.button("📄 Generate PDF Analysis Report (Executive Summary)"):
-            pdf_buffer = generate_pdf_report(hist_df, summary_df, delay_causes)
-            st.download_button("⬇️ Download Analysis Report PDF", pdf_buffer, "construction_analysis_report.pdf", "application/pdf")
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
