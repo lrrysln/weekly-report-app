@@ -13,6 +13,7 @@ matplotlib
 seaborn
 fpdf
 scipy
+xlsxwriter
 
 
 
