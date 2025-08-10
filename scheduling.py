@@ -216,7 +216,7 @@ if 'df_for_kpis' in locals():
     delay_df = compute_delay_cause_breakdown(kpi_df)
     contractor_df = contractor_scorecard(kpi_df)
 
-    tabs = st.tabs(["Executive Summary","Per-Project KPIs","Delay Causes","Contractor Scorecard"])
+    tabs = st.tabs(["Executive Summary", "Per-Project KPIs", "Delay Causes", "Contractor Scorecard", "All Tabs Combined"])
 
     with tabs[0]:
         st.header("Executive Summary")
@@ -245,8 +245,8 @@ if 'df_for_kpis' in locals():
     with tabs[2]:
         st.header("Delay Causes Breakdown")
         if not delay_df.empty:
-            fig = px.bar(delay_df.sort_values('count', ascending=False), x='count', y='cause', orientation='h')
-            st.plotly_chart(fig, use_container_width=True)
+            fig2 = px.bar(delay_df.sort_values('count', ascending=False), x='count', y='cause', orientation='h')
+            st.plotly_chart(fig2, use_container_width=True)
             st.dataframe(delay_df)
         else:
             st.info("No delay cause data found.")
@@ -254,8 +254,51 @@ if 'df_for_kpis' in locals():
     with tabs[3]:
         st.header("Contractor Scorecard")
         if not contractor_df.empty:
-            fig = px.bar(contractor_df.head(30), x='projects', y='contractor', orientation='h')
+            fig3 = px.bar(contractor_df.head(30), x='projects', y='contractor', orientation='h')
+            st.plotly_chart(fig3, use_container_width=True)
+            st.dataframe(contractor_df.fillna(""))
+        else:
+            st.info("No contractor data found.")
+
+    with tabs[4]:
+        st.header("All Tabs Combined")
+
+        # Executive Summary content
+        st.subheader("Executive Summary")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Projects", portfolio_kpis.get('project_count', 0))
+        c2.metric("Avg Planned Duration (days)", f"{portfolio_kpis.get('avg_planned_duration'):.1f}" if portfolio_kpis.get('avg_planned_duration') else "n/a")
+        c3.metric("Avg Actual Duration (days)", f"{portfolio_kpis.get('avg_actual_duration'):.1f}" if portfolio_kpis.get('avg_actual_duration') else "n/a")
+        c4.metric("Avg Cost Variance (%)", f"{portfolio_kpis.get('avg_cost_variance_pct'):.1f}%" if portfolio_kpis.get('avg_cost_variance_pct') else "n/a")
+
+        st.markdown("### Duration: Planned vs Actual")
+        if not dur_chart_df.empty:
             st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Not enough data to plot durations.")
+
+        st.markdown("---")
+
+        # Per-Project KPIs content
+        st.subheader("Per-Project KPIs")
+        st.dataframe(kpi_df.fillna(""), use_container_width=True)
+
+        st.markdown("---")
+
+        # Delay Causes content
+        st.subheader("Delay Causes Breakdown")
+        if not delay_df.empty:
+            st.plotly_chart(fig2, use_container_width=True)
+            st.dataframe(delay_df)
+        else:
+            st.info("No delay cause data found.")
+
+        st.markdown("---")
+
+        # Contractor Scorecard content
+        st.subheader("Contractor Scorecard")
+        if not contractor_df.empty:
+            st.plotly_chart(fig3, use_container_width=True)
             st.dataframe(contractor_df.fillna(""))
         else:
             st.info("No contractor data found.")
