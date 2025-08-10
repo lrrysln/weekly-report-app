@@ -136,7 +136,7 @@ def aggregate_portfolio_kpis(kpi_df):
 
 def compute_delay_cause_breakdown(kpi_df):
     cnt = Counter()
-    for lst in kpi_df['delay_causes_list'].fillna([]):
+    for lst in kpi_df['delay_causes_list'].apply(lambda x: x if isinstance(x, list) else []):
         cnt.update(lst)
     items = sorted(cnt.items(), key=lambda x: x[1], reverse=True)
     return pd.DataFrame(items, columns=['cause', 'count'])
@@ -467,3 +467,4 @@ def format_number(x):
 def format_percent(x):
     if x is None or (isinstance(x, float) and math.isnan(x)): return "n/a"
     return f"{x:.1f}%"
+
