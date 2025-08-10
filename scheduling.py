@@ -3,6 +3,7 @@ import pandas as pd
 import sqlite3
 from PyPDF2 import PdfMerger
 from datetime import datetime
+import io
 
 # ========== DB Setup and Functions ==========
 DB_PATH = 'activities.sqlite'
@@ -95,7 +96,7 @@ uploaded_files = st.file_uploader(
 all_data = []
 
 if uploaded_files:
-    # --- REPLACE THIS BLOCK WITH YOUR REAL PDF EXTRACTION LOGIC ---
+    # Simulate extraction process (replace with your actual extraction)
     for i, pdf_file in enumerate(uploaded_files):
         for line in range(1, 6):  # simulate 5 lines per PDF
             all_data.append({
@@ -113,10 +114,34 @@ if uploaded_files:
     st.header("Extracted Activity Data Preview")
     st.dataframe(df)
 
+    # Download extracted data as CSV
+    csv_data = df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="⬇️ Download extracted data as CSV",
+        data=csv_data,
+        file_name="extracted_activities.csv",
+        mime="text/csv"
+    )
+
+    # Download extracted data as Excel
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Activities')
+        writer.save()
+    processed_data = output.getvalue()
+    st.download_button(
+        label="⬇️ Download extracted data as Excel",
+        data=processed_data,
+        file_name="extracted_activities.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+    # Save to DB button
     if st.button("💾 Save extracted data to local database"):
         save_activities_to_db(all_data)
         st.success(f"Saved {len(all_data)} rows to local database!")
 
+    # Combine PDFs button
     if st.button("📎 Combine all uploaded PDFs into one file"):
         merger = PdfMerger()
         for pdf_file in uploaded_files:
