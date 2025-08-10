@@ -1,26 +1,19 @@
-# streamlit_app.py
 import streamlit as st
 import pandas as pd
 import math
 from datetime import datetime
 from collections import Counter
 from io import BytesIO
-
 import plotly.express as px
 
-from fpdf import FPDF
+EXPECTED_COLUMNS = [
+    'project_id', 'project_name', 'asset_type', 'planned_start', 'planned_finish',
+    'actual_start', 'actual_finish', 'planned_cost', 'actual_cost', 'area_sqft',
+    'delay_causes', 'safety_incidents', 'contractor', 'weather_delay_days',
+    'percent_complete', 'earned_value', 'defects_count', 'warranty_claims',
+    'critical_path_changes'
+]
 
-# Optional python-pptx
-try:
-    from pptx import Presentation
-    from pptx.util import Inches
-    PPTX_AVAILABLE = True
-except Exception:
-    PPTX_AVAILABLE = False
-
-st.set_page_config(page_title="Post-Construction Performance Dashboard", layout="wide")
-
-# ----------------- Helper functions (same logic as CLI script) -----------------
 def parse_dates(df, cols):
     for c in cols:
         if c in df.columns:
@@ -76,7 +69,6 @@ def compute_project_kpis(raw):
         if planned_cost and planned_cost != 0 and not pd.isna(cost_variance):
             cost_variance_pct = cost_variance / planned_cost * 100
 
-        # CPI/EVM proxy
         if 'earned_value' in row and not pd.isna(row.get('earned_value')) and not pd.isna(actual_cost):
             ev = row.get('earned_value')
             ac = actual_cost
@@ -152,18 +144,11 @@ def contractor_scorecard(kpi_df):
             "total_safety_incidents": int(group['safety_incidents'].fillna(0).sum()) if 'safety_incidents' in group.columns else 0,
             "avg_CPI": group['CPI'].dropna().mean() if 'CPI' in group.columns else None
         })
-    
     df = pd.DataFrame(rows)
-    
-    if 'projects' not in df.columns:
-        df['projects'] = 0
-    
     if df.empty:
-        return pd.DataFrame(columns=['contractor', 'projects', 'avg_schedule_variance_pct', 'avg_cost_variance_pct', 'total_safety_incidents', 'avg_CPI'])
-    
+        return df
     return df.sort_values('projects', ascending=False)
 
-# ----------------- Caching compute-heavy functions -----------------
 @st.cache_data
 def load_dataframe(uploaded_file):
     ext = uploaded_file.name.split('.')[-1].lower()
@@ -171,308 +156,106 @@ def load_dataframe(uploaded_file):
         df = pd.read_excel(uploaded_file)
     else:
         df = pd.read_csv(uploaded_file)
-    # normalize columns: strip whitespace
     df.columns = [c.strip() for c in df.columns]
-    df = parse_dates(df, ['planned_start','planned_finish','actual_start','actual_finish'])
     return df
 
-@st.cache_data
-def compute_all_kpis(df):
-    kpis = compute_project_kpis(df)
-    portfolio = aggregate_portfolio_kpis(kpis)
-    delay = compute_delay_cause_breakdown(kpis)
-    contractor = contractor_scorecard(kpis)
-    return kpis, portfolio, delay, contractor
+st.title("🏗️ Post-Construction Performance Dashboard")
 
-# ----------------- UI -----------------
-st.title("🏗️ Post-Construction Performance Dashboard (Streamlit)")
-
-with st.sidebar:
-    st.header("Upload & Options")
-    uploaded = st.file_uploader("Upload projects CSV or Excel", type=['csv','xls','xlsx'])
-    pptx_checkbox = st.checkbox("Create PPTX (requires python-pptx)", value=False)
-    generate_btn = st.button("Generate Reports (PDF & Excel)", type="primary")
-    st.markdown("---")
-    st.write("PDF generation runs when you click **Generate Reports**.")
-    st.write("PPTX will be created only if checked and python-pptx is installed on the server.")
-
+uploaded = st.file_uploader("Upload schedule data CSV or Excel", type=['csv','xls','xlsx'])
 if not uploaded:
-    st.info("Upload a CSV/Excel file with project-level rows to begin. See recommended columns in the README (project_id, project_name, planned_start, planned_finish, actual_start, actual_finish, planned_cost, actual_cost, area_sqft, delay_causes, safety_incidents, contractor, weather_delay_days, percent_complete, earned_value, defects_count, warranty_claims, critical_path_changes).")
+    st.info("Please upload a data file.")
     st.stop()
 
-# Load dataframe
 try:
     raw_df = load_dataframe(uploaded)
 except Exception as e:
-    st.error(f"Could not read uploaded file: {e}")
+    st.error(f"Error loading file: {e}")
     st.stop()
 
-st.success(f"Loaded {len(raw_df)} rows from {uploaded.name}")
+st.write("Preview of uploaded data:")
+st.dataframe(raw_df.head())
 
-# Compute KPIs
-with st.spinner("Computing KPIs..."):
-    kpi_df, portfolio_kpis, delay_df, contractor_df = compute_all_kpis(raw_df)
+uploaded_cols = raw_df.columns.tolist()
+missing_cols = [c for c in EXPECTED_COLUMNS if c not in uploaded_cols]
 
-# Tabs
-tabs = st.tabs(["Executive Summary","Per-Project KPIs","Delay Causes","Contractor Scorecard","Downloads"])
+if not missing_cols:
+    st.success("All expected columns detected.")
+    df_for_kpis = raw_df.copy()
+    df_for_kpis = parse_dates(df_for_kpis, ['planned_start','planned_finish','actual_start','actual_finish'])
+else:
+    st.warning(f"Missing expected columns: {missing_cols}")
+    st.markdown("Map your file's columns to expected KPI fields:")
 
-# ========== Executive Summary ==========
-with tabs[0]:
-    st.header("Executive Summary")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Projects", portfolio_kpis.get('project_count', 0))
-    c2.metric("Avg Planned Duration (days)", f"{portfolio_kpis.get('avg_planned_duration'):.1f}" if portfolio_kpis.get('avg_planned_duration') else "n/a")
-    c3.metric("Avg Actual Duration (days)", f"{portfolio_kpis.get('avg_actual_duration'):.1f}" if portfolio_kpis.get('avg_actual_duration') else "n/a")
-    c4.metric("Avg Cost Variance (%)", f"{portfolio_kpis.get('avg_cost_variance_pct'):.1f}%" if portfolio_kpis.get('avg_cost_variance_pct') else "n/a")
+    mapping = {}
+    for col in EXPECTED_COLUMNS:
+        options = ["(none)"] + uploaded_cols
+        default_index = options.index(col) if col in options else 0
+        mapping[col] = st.selectbox(f"Map '{col}' to:", options, index=default_index, key=col)
 
-    st.markdown("### Duration: planned vs actual (interactive)")
-    # Prepare duration chart
-    dur_chart_df = kpi_df[['project_name','planned_duration_days','actual_duration_days']].dropna(subset=['project_name'])
-    if not dur_chart_df.empty:
-        dur_chart_df = dur_chart_df.sort_values('planned_duration_days', ascending=False).head(50)
-        dur_melt = dur_chart_df.melt(id_vars='project_name', value_vars=['planned_duration_days','actual_duration_days'],
-                                     var_name='type', value_name='days')
-        fig_dur = px.bar(dur_melt, x='days', y='project_name', color='type', orientation='h',
-                         title='Planned vs Actual Duration (days)', barmode='group', height=600)
-        st.plotly_chart(fig_dur, use_container_width=True)
-    else:
-        st.info("Not enough duration data to build chart.")
-
-    st.markdown("### Cost variance (interactive)")
-    cv_df = kpi_df[['project_name','cost_variance_pct']].dropna()
-    if not cv_df.empty:
-        cv_df = cv_df.sort_values('cost_variance_pct', ascending=False).head(50)
-        fig_cv = px.bar(cv_df, x='cost_variance_pct', y='project_name', orientation='h', height=600,
-                        labels={'cost_variance_pct':'Cost Variance (%)','project_name':'Project'})
-        st.plotly_chart(fig_cv, use_container_width=True)
-    else:
-        st.info("Not enough cost data to build chart.")
-
-    st.markdown("### Delay cause breakdown (interactive)")
-    if not delay_df.empty:
-        fig_delay = px.pie(delay_df, names='cause', values='count', title='Delay Cause Breakdown')
-        st.plotly_chart(fig_delay, use_container_width=True)
-    else:
-        st.info("No delay cause tags found in data.")
-
-# ========== Per-Project KPIs ==========
-with tabs[1]:
-    st.header("Per-Project KPIs")
-    st.write("Sortable, filterable table of per-project KPIs.")
-    # Format some columns
-    display_df = kpi_df.copy()
-    # Nicely format percentages
-    def fmt_pct(x):
-        return f"{x:.1f}%" if pd.notna(x) else ""
-    if 'schedule_variance_pct' in display_df.columns:
-        display_df['schedule_variance_pct'] = display_df['schedule_variance_pct'].apply(lambda x: fmt_pct(x))
-    if 'cost_variance_pct' in display_df.columns:
-        display_df['cost_variance_pct'] = display_df['cost_variance_pct'].apply(lambda x: fmt_pct(x))
-    st.dataframe(display_df.fillna(""), use_container_width=True)
-
-# ========== Delay Causes ==========
-with tabs[2]:
-    st.header("Delay Cause Breakdown & Table")
-    st.write("Counts of delay causes across projects")
-    if not delay_df.empty:
-        st.plotly_chart(px.bar(delay_df.sort_values('count', ascending=False), x='count', y='cause', orientation='h', title='Delay Causes'), use_container_width=True)
-        st.dataframe(delay_df, use_container_width=True)
-    else:
-        st.info("No delay causes found.")
-
-# ========== Contractor Scorecard ==========
-with tabs[3]:
-    st.header("Contractor Scorecard")
-    if not contractor_df.empty:
-        st.plotly_chart(px.bar(contractor_df.head(30), x='projects', y='contractor', orientation='h', title='Projects per Contractor'), use_container_width=True)
-        st.dataframe(contractor_df.fillna(""), use_container_width=True)
-    else:
-        st.info("No contractor data available.")
-
-# ========== Downloads & Report Generation ==========
-with tabs[4]:
-    st.header("Downloads & Report Generation")
-    st.write("Generate outputs. PDF is created when you click **Generate Reports**. Excel is available immediately. PPTX only if checked in sidebar and python-pptx is installed on the server.")
-
-    # Prepare Excel bytes (always available)
-    def create_excel_bytes(raw_df, kpi_df, portfolio_kpis, delay_df, contractor_df):
-        out = BytesIO()
-        with pd.ExcelWriter(out, engine='openpyxl') as writer:
-            raw_df.to_excel(writer, sheet_name='raw_data', index=False)
-            kpi_df.to_excel(writer, sheet_name='per_project_kpis', index=False)
-            delay_df.to_excel(writer, sheet_name='delay_causes', index=False)
-            contractor_df.to_excel(writer, sheet_name='contractor_scorecard', index=False)
-            pd.DataFrame([portfolio_kpis]).to_excel(writer, sheet_name='portfolio_summary', index=False)
-        out.seek(0)
-        return out.read()
-
-    excel_bytes = create_excel_bytes(raw_df, kpi_df, portfolio_kpis, delay_df, contractor_df)
-    excel_name = f"post_construction_report_{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.xlsx"
-    st.download_button("Download Excel", data=excel_bytes, file_name=excel_name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-    # PDF and PPTX generation on demand
-    if generate_btn:
-        with st.spinner("Generating PDF (and optional PPTX)..."):
-            # Create some temporary images from plotly for embedding in PDF
-            charts = {}
-            # Duration chart image
-            try:
-                if not dur_chart_df.empty:
-                    charts['duration'] = fig_dur.to_image(format='png', width=1200, height=600, scale=2)
-            except Exception:
-                charts['duration'] = None
-            try:
-                if not cv_df.empty:
-                    charts['cost_variance'] = fig_cv.to_image(format='png', width=1200, height=600, scale=2)
-            except Exception:
-                charts['cost_variance'] = None
-            try:
-                if not delay_df.empty:
-                    charts['delay_pie'] = fig_delay.to_image(format='png', width=800, height=800, scale=2)
-            except Exception:
-                charts['delay_pie'] = None
-
-            # Create PDF in memory
-            pdf = FPDF(orientation='P', unit='mm', format='A4')
-            pdf.set_auto_page_break(auto=True, margin=15)
-            pdf.add_page()
-            pdf.set_font("Arial", 'B', 16)
-            pdf.cell(0, 8, "Post-Construction Executive Summary", ln=True)
-            pdf.ln(2)
-            pdf.set_font("Arial", size=11)
-            pdf.cell(0, 6, f"Projects analyzed: {portfolio_kpis.get('project_count', 0)}", ln=True)
-            pdf.cell(0, 6, f"Avg planned duration (days): {format_number(portfolio_kpis.get('avg_planned_duration'))}", ln=True)
-            pdf.cell(0, 6, f"Avg actual duration (days): {format_number(portfolio_kpis.get('avg_actual_duration'))}", ln=True)
-            pdf.cell(0, 6, f"Median schedule variance (days): {format_number(portfolio_kpis.get('median_schedule_variance_days'))}", ln=True)
-            pdf.cell(0, 6, f"Avg schedule variance (%): {format_percent(portfolio_kpis.get('avg_schedule_variance_pct'))}", ln=True)
-            pdf.cell(0, 6, f"Avg cost variance (%): {format_percent(portfolio_kpis.get('avg_cost_variance_pct'))}", ln=True)
-            pdf.cell(0, 6, f"Avg CPI: {format_number(portfolio_kpis.get('avg_CPI'))}", ln=True)
-            pdf.ln(4)
-
-            # embed images if present
-            for key in ('duration','cost_variance','delay_pie'):
-                img = charts.get(key)
-                if img:
-                    # write bytes to fpdf from memory by saving to BytesIO and using FPDF.image via temp file workaround
-                    img_b = BytesIO(img)
-                    # FPDF.image needs a filename — use temporary file in memory by writing to BytesIO + trick: s output to 'S' not supported for image
-                    # Simpler: write to a temporary file
-                    import tempfile, os
-                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-                    try:
-                        tmp.write(img_b.read())
-                        tmp.flush()
-                        tmp.close()
-                        # Fit width 180mm (A4 margin)
-                        pdf.image(tmp.name, w=180)
-                        pdf.ln(4)
-                    finally:
-                        try:
-                            os.unlink(tmp.name)
-                        except Exception:
-                            pass
-
-            # top projects
-            pdf.set_font("Arial", 'B', 12)
-            pdf.cell(0, 6, "Top Projects (by cost variance % / schedule variance):", ln=True)
-            pdf.set_font("Arial", size=10)
-            top_projects = kpi_df.copy()
-            top_projects['abs_cost_var_pct'] = top_projects['cost_variance_pct'].abs().fillna(0)
-            top_projects_sorted = top_projects.sort_values(['abs_cost_var_pct','schedule_variance_pct'], ascending=[False, False])
-            if not top_projects_sorted.empty:
-                for _, r in top_projects_sorted.head(6).iterrows():
-                    name = (r.get('project_name') or str(r.get('project_id')))[:50]
-                    scv = format_percent(r.get('schedule_variance_pct'))
-                    ccv = format_percent(r.get('cost_variance_pct'))
-                    pdf.multi_cell(0, 5, f"• {name} — Schedule var: {scv}, Cost var: {ccv}")
-            pdf.ln(3)
-            pdf.set_font("Arial", size=8)
-            pdf.cell(0, 6, f"Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}", ln=True)
-
-            # Output PDF bytes
-            try:
-                pdf_bytes = pdf.output(dest='S').encode('latin-1')
-            except TypeError:
-                # older fpdf behavior
-                pdf_file = BytesIO()
-                pdf.output(pdf_file)
-                pdf_bytes = pdf_file.getvalue()
-
-            pdf_name = f"executive_summary_{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.pdf"
-            st.success("PDF generated successfully.")
-            st.download_button("Download PDF", data=pdf_bytes, file_name=pdf_name, mime="application/pdf")
-
-            # Optional PPTX generation
-            if pptx_checkbox:
-                if not PPTX_AVAILABLE:
-                    st.warning("python-pptx not installed on server — cannot create PPTX.")
-                else:
-                    prs = Presentation()
-                    s = prs.slides.add_slide(prs.slide_layouts[0])
-                    s.shapes.title.text = "Post-Construction Performance Report"
-                    try:
-                        s.placeholders[1].text = f"Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
-                    except Exception:
-                        pass
-
-                    # portfolio slide
-                    slide = prs.slides.add_slide(prs.slide_layouts[5])
-                    slide.shapes.title.text = "Portfolio Summary"
-                    tf = slide.shapes.placeholders[1].text_frame
-                    tf.text = f"Projects: {portfolio_kpis.get('project_count',0)}"
-                    p = tf.add_paragraph()
-                    p.text = f"Avg schedule variance (%): {format_percent(portfolio_kpis.get('avg_schedule_variance_pct'))}"
-
-                    # attach chart images
-                    for key, b in charts.items():
-                        if b:
-                            tmp = BytesIO(b)
-                            # pptx wants a filename-like object; save to temp file
-                            import tempfile, os
-                            tmpf = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-                            try:
-                                tmpf.write(tmp.getvalue())
-                                tmpf.flush()
-                                tmpf.close()
-                                slide = prs.slides.add_slide(prs.slide_layouts[5])
-                                slide.shapes.title.text = key.replace('_',' ').title()
-                                slide.shapes.add_picture(tmpf.name, Inches(0.5), Inches(1.2), width=Inches(9))
-                            finally:
-                                try:
-                                    os.unlink(tmpf.name)
-                                except Exception:
-                                    pass
-
-                    # project detail slides (top 10)
-                    for _, row in kpi_df.head(10).iterrows():
-                        slide = prs.slides.add_slide(prs.slide_layouts[5])
-                        slide.shapes.title.text = str(row.get('project_name') or row.get('project_id'))
-                        body = slide.shapes.placeholders[1].text_frame
-                        body.text = f"Planned dur: {row.get('planned_duration_days')} days"
-                        body.add_paragraph().text = f"Actual dur: {row.get('actual_duration_days')} days"
-                        body.add_paragraph().text = f"Schedule var (%): {format_percent(row.get('schedule_variance_pct'))}"
-                        body.add_paragraph().text = f"Cost var (%): {format_percent(row.get('cost_variance_pct'))}"
-                        body.add_paragraph().text = f"CPI: {format_number(row.get('CPI'))}"
-
-                    # write to bytes
-                    pptx_io = BytesIO()
-                    prs.save(pptx_io)
-                    pptx_io.seek(0)
-                    pptx_name = f"post_construction_report_{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.pptx"
-                    st.download_button("Download PPTX", data=pptx_io.read(), file_name=pptx_name, mime="application/vnd.openxmlformats-officedocument.presentationml.presentation")
+    if st.button("Process Mapped Data"):
+        mapped_data = {}
+        for col, mapped_col in mapping.items():
+            if mapped_col != "(none)":
+                mapped_data[col] = raw_df[mapped_col]
             else:
-                st.info("PPTX generation skipped (checkbox not checked).")
-
+                # Provide default values if sensible
+                if col in ['safety_incidents', 'weather_delay_days', 'defects_count', 'warranty_claims', 'critical_path_changes']:
+                    mapped_data[col] = 0
+                else:
+                    mapped_data[col] = pd.NA
+        df_for_kpis = pd.DataFrame(mapped_data)
+        df_for_kpis = parse_dates(df_for_kpis, ['planned_start','planned_finish','actual_start','actual_finish'])
+        st.success("Data mapped and ready.")
+        st.dataframe(df_for_kpis.head())
     else:
-        st.info("Click 'Generate Reports' in the sidebar to create PDF and optional PPTX.")
+        st.stop()
 
-# ----------------- Utility formatting functions -----------------
-def format_number(x):
-    if x is None or (isinstance(x, float) and math.isnan(x)): return "n/a"
-    if isinstance(x, float): return f"{x:,.2f}"
-    return str(x)
+if 'df_for_kpis' in locals():
+    kpi_df = compute_project_kpis(df_for_kpis)
+    portfolio_kpis = aggregate_portfolio_kpis(kpi_df)
+    delay_df = compute_delay_cause_breakdown(kpi_df)
+    contractor_df = contractor_scorecard(kpi_df)
 
-def format_percent(x):
-    if x is None or (isinstance(x, float) and math.isnan(x)): return "n/a"
-    return f"{x:.1f}%"
+    tabs = st.tabs(["Executive Summary","Per-Project KPIs","Delay Causes","Contractor Scorecard"])
 
+    with tabs[0]:
+        st.header("Executive Summary")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Projects", portfolio_kpis.get('project_count', 0))
+        c2.metric("Avg Planned Duration (days)", f"{portfolio_kpis.get('avg_planned_duration'):.1f}" if portfolio_kpis.get('avg_planned_duration') else "n/a")
+        c3.metric("Avg Actual Duration (days)", f"{portfolio_kpis.get('avg_actual_duration'):.1f}" if portfolio_kpis.get('avg_actual_duration') else "n/a")
+        c4.metric("Avg Cost Variance (%)", f"{portfolio_kpis.get('avg_cost_variance_pct'):.1f}%" if portfolio_kpis.get('avg_cost_variance_pct') else "n/a")
+
+        st.markdown("### Duration: Planned vs Actual")
+        dur_chart_df = kpi_df[['project_name','planned_duration_days','actual_duration_days']].dropna(subset=['project_name'])
+        if not dur_chart_df.empty:
+            dur_chart_df = dur_chart_df.sort_values('planned_duration_days', ascending=False).head(50)
+            dur_melt = dur_chart_df.melt(id_vars='project_name', value_vars=['planned_duration_days','actual_duration_days'],
+                                        var_name='type', value_name='days')
+            fig = px.bar(dur_melt, x='days', y='project_name', color='type', orientation='h',
+                         barmode='group', height=600)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Not enough data to plot durations.")
+
+    with tabs[1]:
+        st.header("Per-Project KPIs")
+        st.dataframe(kpi_df.fillna(""), use_container_width=True)
+
+    with tabs[2]:
+        st.header("Delay Causes Breakdown")
+        if not delay_df.empty:
+            fig = px.bar(delay_df.sort_values('count', ascending=False), x='count', y='cause', orientation='h')
+            st.plotly_chart(fig, use_container_width=True)
+            st.dataframe(delay_df)
+        else:
+            st.info("No delay cause data found.")
+
+    with tabs[3]:
+        st.header("Contractor Scorecard")
+        if not contractor_df.empty:
+            fig = px.bar(contractor_df.head(30), x='projects', y='contractor', orientation='h')
+            st.plotly_chart(fig, use_container_width=True)
+            st.dataframe(contractor_df.fillna(""))
+        else:
+            st.info("No contractor data found.")
