@@ -2,13 +2,14 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from PyPDF2 import PdfMerger
-from datetime import datetime
+from datetime import datetime, timedelta
 import io
 import matplotlib.pyplot as plt
 import seaborn as sns
 from fpdf import FPDF
 import tempfile
 from scipy.stats import zscore
+import requests
 
 # === DB Setup and Functions ===
 DB_PATH = 'activities.sqlite'
@@ -74,6 +75,23 @@ def load_activities_from_db():
             "Notes": r[8]
         })
     return data
+
+# === Duplicate Entry Detection ===
+def find_duplicates(df):
+    # Consider duplicate if same project_code + activity_id + activity_name + start_date + finish_date
+    duplicates = df[df.duplicated(subset=['Project Code', 'Activity ID', 'Activity Name', 'Start Date', 'Finish Date'], keep=False)]
+    return duplicates.sort_values(['Project Code', 'Activity ID'])
+
+# === Weather Forecasting ===
+def get_weather_forecast(city='New York'):
+    # Using a free API example: Open-Meteo or similar (No key needed)
+    # For demo, a fake static forecast
+    # You can replace with real API calls with your API key
+    forecast = [
+        {"date": datetime.now() + timedelta(days=i), "temp_c": 20 + i, "condition": "Sunny" if i % 2 == 0 else "Cloudy"}
+        for i in range(7)
+    ]
+    return forecast
 
 # === Historical Data & Analysis Functions ===
 def load_sample_data():
@@ -276,20 +294,22 @@ def generate_pdf_report(df, summary_df, delay_causes):
 # === Streamlit App UI ===
 
 def main():
-    st.title("📄 Project Schedule PDF Extractor, Storage & Analysis")
+    st.title("📄 Construction Project Schedule Manager & Analysis")
 
     # Initialize DB
     init_db()
 
     # Tabs for different sections
     tabs = st.tabs([
-        "PDF Upload & Extraction",
-        "Stored Activities",
-        "Advanced KPIs & Diagnostics",
-        "Executive Summary"
+        "1. PDF Upload & Extraction",
+        "2. Stored Activities",
+        "3. Duplicate Entry Check",
+        "4. Weather Forecast",
+        "5. Advanced KPIs & Diagnostics",
+        "6. Executive Summary"
     ])
 
-    # === Tab 0: PDF Upload & Extraction ===
+    # === Tab 1: PDF Upload & Extraction ===
     with tabs[0]:
         st.header("Upload Project Schedule PDFs")
         uploaded_files = st.file_uploader(
@@ -347,7 +367,7 @@ def main():
         else:
             st.info("Upload PDFs to extract and store project activity data.")
 
-    # === Tab 1: Stored Activities ===
+    # === Tab 2: Stored Activities ===
     with tabs[1]:
         st.header("📂 Previously Stored Activities")
         stored_data = load_activities_from_db()
@@ -357,35 +377,32 @@ def main():
         else:
             st.info("No stored data found in local database yet.")
 
-    # === Tab 2: Advanced KPIs & Diagnostics ===
+    # === Tab 3: Duplicate Entry Check ===
     with tabs[2]:
-        st.header("📊 Advanced KPIs & Diagnostics")
+        st.header("🔍 Duplicate Entry Detection")
+        stored_data = load_activities_from_db()
+        if stored_data:
+            df_stored = pd.DataFrame(stored_data)
+            duplicates = find_duplicates(df_stored)
+            if not duplicates.empty:
+                st.warning(f"Found {len(duplicates)} duplicate entries:")
+                st.dataframe(duplicates)
+            else:
+                st.success("No duplicate entries found.")
+        else:
+            st.info("No data in the database to check for duplicates.")
 
-        # For example purpose: reuse sample data and calculations here
-        hist_df = load_sample_data()
-        hist_df = calculate_kpis(hist_df)
-        hist_df = calculate_earned_value_metrics(hist_df)
-        hist_df = calculate_productivity(hist_df)
-        summary_df = project_summary(hist_df)
-        summary_df = add_benchmarking_metrics(summary_df)
-        delay_causes = delay_cause_analysis(hist_df)
-
-        st.subheader("Summary Table")
-        st.dataframe(summary_df)
-
-        st.subheader("Recommendations")
-        recs = generate_recommendations(summary_df)
-        for r in recs:
-            st.write(r)
-
-        st.subheader("Select Project for Gantt Chart")
-        project_option = st.selectbox("Project:", summary_df['project_id'].unique(), key="adv_proj_select")
-        gantt_img_buf = plot_gantt_chart(hist_df, project_option)
-        st.image(gantt_img_buf)
-
-    # === Tab 3: Executive Summary ===
+    # === Tab 4: Weather Forecast ===
     with tabs[3]:
-        st.header("📈 Executive Summary")
+        st.header("🌤️ Weather Forecast")
+        city = st.text_input("Enter city for weather forecast:", value="New York")
+        forecast = get_weather_forecast(city)
+        for day in forecast:
+            st.write(f"{day['date'].strftime('%Y-%m-%d')}: {day['temp_c']} °C, {day['condition']}")
+
+    # === Tab 5: Advanced KPIs & Diagnostics ===
+    with tabs[4]:
+        st.header("📈 Advanced KPIs & Diagnostics")
 
         hist_df = load_sample_data()
         hist_df = calculate_kpis(hist_df)
@@ -407,7 +424,59 @@ def main():
         st.write(generate_narrative(summary_df))
 
         st.subheader("Select Project for Gantt Chart")
-        project_option = st.selectbox("Project:", summary_df['project_id'].unique(), key="exec_proj_select")
+        project_option = st.selectbox("Project:", summary_df['project_id'].unique())
+        gantt_img_buf = plot_gantt_chart(hist_df, project_option)
+        if gantt_img_buf:
+            st.image(gantt_img_buf)
+
+        st.subheader("Delay Cause Analysis")
+        if delay_causes.empty:
+            st.write("No delays reported across projects.")
+        else:
+            delay_img_buf = plot_delay_causes(delay_causes)
+            if delay_img_buf:
+                st.image(delay_img_buf)
+
+        st.subheader("Cost Variance Waterfall Chart")
+        waterfall_fig = plot_cost_variance_waterfall(summary_df)
+        st.pyplot(waterfall_fig)
+
+        st.subheader("Delay Causes Heatmap")
+        heatmap_fig = plot_delay_heatmap(hist_df)
+        st.pyplot(heatmap_fig)
+
+        issues = validate_data(hist_df)
+        if issues:
+            for issue in issues:
+                st.warning(issue)
+        else:
+            st.success("Data validation passed")
+
+    # === Tab 6: Executive Summary ===
+    with tabs[5]:
+        st.header("📝 Executive Summary & Full Analysis")
+
+        # Use same sample data from advanced KPIs tab
+        hist_df = load_sample_data()
+        hist_df = calculate_kpis(hist_df)
+        hist_df = calculate_earned_value_metrics(hist_df)
+        hist_df = calculate_productivity(hist_df)
+        summary_df = project_summary(hist_df)
+        delay_causes = delay_cause_analysis(hist_df)
+
+        st.subheader("Summary Table")
+        st.dataframe(summary_df)
+
+        st.subheader("Recommendations")
+        recs = generate_recommendations(summary_df)
+        for r in recs:
+            st.write(r)
+
+        st.subheader("Narrative Executive Summary")
+        st.write(generate_narrative(summary_df))
+
+        st.subheader("Select Project for Gantt Chart")
+        project_option = st.selectbox("Project (Executive Summary):", summary_df['project_id'].unique(), key="exec_proj_select")
         gantt_img_buf = plot_gantt_chart(hist_df, project_option)
         if gantt_img_buf:
             st.image(gantt_img_buf)
