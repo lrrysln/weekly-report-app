@@ -1,566 +1,443 @@
 import streamlit as st
-import pdfplumber
 import pandas as pd
-import re
-import os
+import sqlite3
+from PyPDF2 import PdfMerger
+from datetime import datetime
+import io
+import matplotlib.pyplot as plt
+import seaborn as sns
+from fpdf import FPDF
 import tempfile
-import pickle
-import numpy as np
-from datetime import datetime, timedelta
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-import altair as alt
-import requests
-from scipy.stats import zscore, pearsonr
-import random
+from scipy.stats import zscore
 
-# ======================
-# Google Drive Setup
-# ======================
-SCOPES = ['https://www.googleapis.com/auth/drive.file']
-CREDENTIALS_FILE = 'credentials.json'
-TOKEN_PICKLE = 'token.pickle'
-DRIVE_FOLDER_ID = 'YOUR_GOOGLE_DRIVE_FOLDER_ID'  # Use your actual folder ID here
-API_KEY = "3f5a9ae8a3c7d5c8438e0f4cf4b0b610"  # OpenWeatherMap API Key
+# === DB Setup and Functions ===
+DB_PATH = 'activities.sqlite'
 
-@st.cache_resource
-def authenticate_google_drive():
-    creds = None
-    if os.path.exists(TOKEN_PICKLE):
-        with open(TOKEN_PICKLE, 'rb') as token:
-            creds = pickle.load(token)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open(TOKEN_PICKLE, 'wb') as token:
-            pickle.dump(creds, token)
-    return build('drive', 'v3', credentials=creds)
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS activities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_code TEXT,
+        project_name TEXT,
+        activity_id TEXT,
+        activity_name TEXT,
+        duration INTEGER,
+        start_date TEXT,
+        finish_date TEXT,
+        float INTEGER,
+        notes TEXT
+    )
+    ''')
+    conn.commit()
+    conn.close()
 
-def upload_csv_to_drive(csv_path, file_name, folder_id=None):
-    service = authenticate_google_drive()
-    file_metadata = {'name': file_name, 'mimeType': 'text/csv'}
-    if folder_id:
-        file_metadata['parents'] = [folder_id]
-    media = MediaFileUpload(csv_path, mimetype='text/csv')
-    file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-    return file.get('id')
+def save_activities_to_db(data):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    for row in data:
+        c.execute('''
+        INSERT INTO activities (project_code, project_name, activity_id, activity_name, duration, start_date, finish_date, float, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            row.get('Project Code'),
+            row.get('Project Name'),
+            row.get('Activity ID'),
+            row.get('Activity Name'),
+            row.get('Duration'),
+            row['Start Date'].strftime('%Y-%m-%d') if row.get('Start Date') else None,
+            row['Finish Date'].strftime('%Y-%m-%d') if row.get('Finish Date') else None,
+            row.get('Float'),
+            row.get('Notes')
+        ))
+    conn.commit()
+    conn.close()
 
-# ======================
-# PDF Report Generation
-# ======================
-def create_pdf_report(df, critical_df, selected_project, gantt_chart_img_path=None):
-    output_path = os.path.join(tempfile.gettempdir(),
-                               f"Activity_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
-    c = canvas.Canvas(output_path, pagesize=letter)
-    width, height = letter
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(50, height - 50, "📄 Project Activity Summary Report")
-    c.setFont("Helvetica", 10)
-    c.drawString(50, height - 70, f"Project: {selected_project}")
-    c.drawString(50, height - 85, f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    y = height - 110
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(50, y, "📊 Key Metrics:")
-    y -= 15
-    c.setFont("Helvetica", 10)
+def load_activities_from_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT project_code, project_name, activity_id, activity_name, duration, start_date, finish_date, float, notes FROM activities')
+    rows = c.fetchall()
+    conn.close()
+    data = []
+    for r in rows:
+        data.append({
+            "Project Code": r[0],
+            "Project Name": r[1],
+            "Activity ID": r[2],
+            "Activity Name": r[3],
+            "Duration": r[4],
+            "Start Date": pd.to_datetime(r[5]) if r[5] else None,
+            "Finish Date": pd.to_datetime(r[6]) if r[6] else None,
+            "Float": r[7],
+            "Notes": r[8]
+        })
+    return data
 
-    # Add advanced KPIs to report
-    c.drawString(60, y, f"🗂 Total Activities: {len(df)}")
-    y -= 12
-    c.drawString(60, y, f"📁 Projects: {df['Project Code'].nunique()}")
-    y -= 12
-    c.drawString(60, y, f"🚨 Zero Float Tasks: {len(df[df['Float'] == 0])}")
-    y -= 12
-
-    # Advanced KPI summaries
-    c.drawString(60, y, f"🔍 Avg Cost Performance Index (CPI): {df['CPI'].mean():.2f}")
-    y -= 12
-    c.drawString(60, y, f"🔍 Avg Schedule Performance Index (SPI): {df['SPI'].mean():.2f}")
-    y -= 20
-
-    if gantt_chart_img_path and os.path.exists(gantt_chart_img_path):
-        c.setFont("Helvetica-Bold", 12)
-        c.drawString(50, y, "📅 Gantt Chart:")
-        y -= 300
-        c.drawImage(gantt_chart_img_path, 50, y, width=500, height=250)
-        y -= 20
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(50, y, "🚨 Critical Tasks:")
-    y -= 15
-    c.setFont("Helvetica", 8)
-    for _, row in critical_df.head(10).iterrows():
-        if y < 50:
-            c.showPage()
-            y = height - 50
-        c.drawString(50, y,
-                     f"{row['Activity ID']} - {row['Activity Name']}, Float: {row['Float']}, Project: {row['Project Name']}")
-        y -= 10
-    c.save()
-    return output_path
-
-# ======================
-# Activity Categorization
-# ======================
-def categorize_activity(name):
-    name = name.lower()
-    categories = {
-        "🏗 Site Work & Earthwork": ["clear", "grade", "trench", "backfill", "earthwork", "site"],
-        "🧱 Foundation & Structural": ["foundation", "slab", "footing", "structural"],
-        "⚙️ Fuel System Installation": ["tank", "dispenser", "piping", "fuel", "gas"],
-        "🛠️ Building Construction": ["building", "framing", "roof", "wall", "interior"],
-        "🌿 Landscaping & Finishing": ["landscape", "sidewalk", "curb", "paving", "striping"],
-        "📋 Final Inspection & Handover": ["inspection", "punchlist", "handover", "final"]
-    }
-    for label, words in categories.items():
-        if any(w in name for w in words):
-            return label
-    return "❓ Uncategorized"
-
-# ======================
-# Weather API Integration
-# ======================
-def get_weather_forecast(location):
-    url = f"http://api.openweathermap.org/data/2.5/forecast?q={location}&appid={API_KEY}&units=metric"
-    resp = requests.get(url)
-    if resp.status_code == 200:
-        return resp.json()
-    st.error("Failed to fetch weather data. Check location or API key.")
-    return None
-
-def is_weather_delay(date, forecast_data, rain_threshold=1):
-    if not forecast_data:
-        return False
-    for item in forecast_data.get('list', []):
-        if datetime.strptime(item['dt_txt'], "%Y-%m-%d %H:%M:%S").date() == date.date():
-            if item.get('rain', {}).get('3h', 0) > rain_threshold:
-                return True
-    return False
-
-def render_weather_forecast(forecast_data, days=7):
-    alerts = []
-    today = datetime.utcnow().date()
-    future_days = [today + timedelta(days=i) for i in range(days)]
-
-    daily_forecast = {str(day): [] for day in future_days}
-    for entry in forecast_data.get('list', []):
-        date_str = entry['dt_txt'].split()[0]
-        if datetime.strptime(date_str, '%Y-%m-%d').date() in future_days:
-            daily_forecast[date_str].append(entry)
-
-    html_blocks = []
-    for date, entries in daily_forecast.items():
-        if not entries:
-            continue
-
-        temps = [e['main']['temp'] for e in entries]
-        weather_descs = [e['weather'][0]['description'] for e in entries]
-        icons = []
-        color = "black"
-        bold = False
-
-        if any("rain" in desc for desc in weather_descs):
-            icons.append("🌧")
-            alerts.append(f"🌧 Rain expected on {date}")
-        if any("snow" in desc for desc in weather_descs):
-            icons.append("❄️")
-            alerts.append(f"❄️ Snow expected on {date}")
-
-        max_temp = max(temps)
-        min_temp = min(temps)
-
-        if max_temp >= 35:
-            bold = True
-            color = "red"
-            alerts.append(f"🔥 Extreme heat expected on {date} (up to {max_temp}°C)")
-        elif min_temp <= -5:
-            bold = True
-            color = "blue"
-            alerts.append(f"🧊 Extreme cold expected on {date} (low of {min_temp}°C)")
-
-        font_style = f"color:{color}; font-weight:{'bold' if bold else 'normal'}"
-
-        html_blocks.append(f"""
-            <div style="padding:5px 10px; margin:5px; border:1px solid #ccc; border-radius:5px;">
-                <div><strong>{date}</strong> — <span style="{font_style}">{', '.join(set(weather_descs))}</span> {''.join(set(icons))}</div>
-                <div style="font-size: 0.9em;">
-                    Temp: {min_temp:.1f}°C to {max_temp:.1f}°C<br>
-                    <span style="color:#ccc;">{', '.join(set(weather_descs))}</span>
-                </div>
-            </div>
-        """)
-
-    return html_blocks, alerts
-
-# ======================
-# Advanced KPIs and Diagnostics
-# ======================
-def compute_ev_metrics(df):
-    # Earned Value (EV) Metrics Calculations - simplified example
-
-    # Planned Value (PV) = planned % complete * Budget At Completion (BAC)
-    # Earned Value (EV) = actual % complete * BAC
-    # Actual Cost (AC) = from input (simulate here)
-    # CPI = EV / AC
-    # SPI = EV / PV
-
-    # For this example, we simulate BAC and AC
-    BAC = 100000  # Total budget estimate (simulate)
-    df = df.copy()
-    df["BAC"] = BAC / len(df)  # evenly distribute budget per activity
-    df["PV"] = df["% Complete"] / 100 * df["BAC"]  # Planned Value approx
-    df["EV"] = df["% Complete"] / 100 * df["BAC"]  # Assume actual % complete equals planned for now
-
-    # Simulate Actual Cost (AC) with noise: some tasks cost more or less
-    np.random.seed(42)
-    df["AC"] = df["BAC"] * np.random.normal(loc=1.0, scale=0.1, size=len(df))
-    df["CPI"] = df["EV"] / df["AC"]  # Cost Performance Index
-    df["SPI"] = df["EV"] / df["PV"]  # Schedule Performance Index
-
-    # Clamp SPI to avoid division by zero
-    df["SPI"].replace([np.inf, -np.inf], np.nan, inplace=True)
-    df["SPI"].fillna(1, inplace=True)
-
+# === Historical Data & Analysis Functions ===
+def load_sample_data():
+    data = [
+        ['ProjectA', 'Foundation', '2025-01-01', '2025-01-10', '2025-01-01', '2025-01-12', None, 100, 5000],
+        ['ProjectA', 'Framing', '2025-01-11', '2025-01-25', '2025-01-13', '2025-01-28', 'Weather', 200, 12000],
+        ['ProjectA', 'Finishes', '2025-01-26', '2025-02-10', '2025-01-29', '2025-02-08', None, 150, 8000],
+        ['ProjectB', 'Foundation', '2025-02-01', '2025-02-12', '2025-02-02', '2025-02-14', 'Material Delay', 110, 5200],
+        ['ProjectB', 'Framing', '2025-02-13', '2025-02-28', '2025-02-15', '2025-03-05', 'Labor Shortage', 210, 12500],
+        ['ProjectB', 'Finishes', '2025-03-01', '2025-03-15', '2025-03-06', '2025-03-16', None, 160, 9000],
+    ]
+    df = pd.DataFrame(data, columns=['project_id', 'activity', 'planned_start', 'planned_end', 'actual_start', 'actual_end', 'delay_reason', 'labor_hours', 'cost'])
+    for col in ['planned_start', 'planned_end', 'actual_start', 'actual_end']:
+        df[col] = pd.to_datetime(df[col])
     return df
 
-def monte_carlo_schedule_simulation(df, simulations=1000):
-    # Monte Carlo simulation of schedule risk based on task durations and float
-    total_durations = []
-    for _ in range(simulations):
-        simulated_finish_dates = []
-        for _, row in df.iterrows():
-            # Simulate a delay within float +/- 50%
-            delay = np.random.uniform(-0.5, 0.5) * row["Float"] if row["Float"] > 0 else 0
-            duration = max(1, row["Duration"] + delay)
-            simulated_finish_dates.append(duration)
-        total_durations.append(sum(simulated_finish_dates))
-    return np.percentile(total_durations, 90)  # 90th percentile finish duration
+def calculate_kpis(df):
+    df['planned_duration'] = (df['planned_end'] - df['planned_start']).dt.days
+    df['actual_duration'] = (df['actual_end'] - df['actual_start']).dt.days
+    df['schedule_variance'] = df['planned_duration'] - df['actual_duration']
+    df['spi'] = df['planned_duration'] / df['actual_duration']
+    df['delay_days'] = (df['actual_end'] - df['planned_end']).dt.days.clip(lower=0)
+    return df
+
+def calculate_earned_value_metrics(df):
+    df['BAC'] = df['cost']  # budget at completion per activity
+    df['pct_complete'] = (df['actual_duration'] / df['planned_duration']).clip(upper=1)
+    df['PV'] = df['planned_duration'] / df['planned_duration'].sum() * df['cost'].sum()
+    df['EV'] = df['pct_complete'] * df['BAC']
+    df['AC'] = df['cost']  # assumed equal to cost here
+    df['CPI'] = df['EV'] / df['AC']
+    df['SPI'] = df['EV'] / df['PV']
+    return df
 
 def identify_critical_path(df):
-    # Simplified critical path: activities with zero float or minimal float
-    critical_df = df[df["Float"] <= 0]
-    return critical_df
+    critical_activities = df[df['float'] == 0] if 'float' in df.columns else pd.DataFrame()
+    return critical_activities
 
-def productivity_metrics(df):
-    # Simulate labor hours per unit output from 'Duration'
-    # Assuming Duration days and random labor hours per day
-    np.random.seed(42)
-    labor_hours_per_day = np.random.uniform(6, 10, size=len(df))
-    df = df.copy()
-    df["Labor Hours"] = df["Duration"] * labor_hours_per_day
-    # Units output simulated from duration and labor hours (inverse relation)
-    df["Units Output"] = df["Duration"] * np.random.uniform(0.8, 1.2, size=len(df))
-    df["Labor Hours per Unit"] = df["Labor Hours"] / df["Units Output"]
+def calculate_productivity(df):
+    df['labor_per_unit'] = df['labor_hours'] / df['actual_duration']
     return df
 
-def correlation_analysis(df):
-    # Statistical test correlation between Float and Cost Overruns (simulated)
-    # Cost Overrun: AC - EV
-    df = df.copy()
-    df["Cost Overrun"] = df["AC"] - df["EV"]
-    corr, p_value = pearsonr(df["Float"], df["Cost Overrun"])
-    return corr, p_value
+def project_summary(df):
+    summary = df.groupby('project_id').agg(
+        total_planned_duration=('planned_duration', 'sum'),
+        total_actual_duration=('actual_duration', 'sum'),
+        total_labor_hours=('labor_hours', 'sum'),
+        total_cost=('cost', 'sum'),
+        avg_spi=('spi', 'mean'),
+        total_delay_days=('delay_days', 'sum')
+    ).reset_index()
+    summary['schedule_variance'] = summary['total_planned_duration'] - summary['total_actual_duration']
+    return summary
 
-# ======================
-# Streamlit App UI
-# ======================
-st.set_page_config(page_title="Multi-PDF Activity Extractor with Advanced KPIs", layout="wide")
-st.title("📄 Multi-PDF Activity Extractor & Google Drive Uploader with Advanced KPIs")
+def add_benchmarking_metrics(summary_df):
+    summary_df['cost_zscore'] = zscore(summary_df['total_cost'])
+    summary_df['spi_zscore'] = zscore(summary_df['avg_spi'])
+    summary_df['cost_percentile'] = summary_df['total_cost'].rank(pct=True)
+    summary_df['spi_percentile'] = summary_df['avg_spi'].rank(pct=True)
+    return summary_df
 
-uploaded_files = st.file_uploader("Upload one or more PDF files", type="pdf", accept_multiple_files=True)
+def generate_recommendations(summary_df):
+    recommendations = []
+    for _, row in summary_df.iterrows():
+        rec = f"Project {row['project_id']}: "
+        if row['avg_spi'] < 1:
+            rec += "Schedule behind — consider accelerating critical tasks. "
+        if row['total_cost'] > summary_df['total_cost'].mean():
+            rec += "Cost over budget — review expense controls. "
+        recommendations.append(rec)
+    return recommendations
 
-if uploaded_files:
-    all_data, total_skipped = [], []
-    for uploaded_file in uploaded_files:
-        pdf_name = os.path.splitext(uploaded_file.name)[0]
-        st.info(f"📄 Processing: `{uploaded_file.name}`")
-        title_parts = pdf_name.split(" - ")
-        project_code = title_parts[0].strip() if title_parts else "Unknown"
-        project_name = title_parts[1].strip().title() if len(title_parts) > 1 else "Unknown Project"
-        text = ""
-        with pdfplumber.open(uploaded_file) as pdf:
-            for page in pdf.pages:
-                txt = page.extract_text()
-                if txt:
-                    text += txt + "\n"
-        pattern = re.compile(r"^(\S+)\s+(.+?)\s+(\d+)\s+(\d{2}-\d{2}-\d{2})\s+(\d{2}-\d{2}-\d{2})\s+(\d+)\s+(.*)$")
-        for line in text.strip().split('\n'):
-            m = pattern.match(line.strip())
-            if m:
-                all_data.append({
-                    "Project Code": project_code,
-                    "Project Name": project_name,
-                    "Activity ID": m.group(1),
-                    "Activity Name": m.group(2),
-                    "Duration": int(m.group(3)),
-                    "Start Date": m.group(4),
-                    "Finish Date": m.group(5),
-                    "Float": int(m.group(6)),
-                    "Notes": m.group(7)
-                })
-            else:
-                total_skipped.append({"PDF": uploaded_file.name, "Line": line})
+def plot_gantt_chart(df, project_id):
+    project_df = df[df['project_id'] == project_id]
+    if project_df.empty:
+        return None
+    fig, ax = plt.subplots(figsize=(10, 3))
+    y_pos = range(len(project_df))
+    ax.barh(y_pos, project_df['planned_duration'], left=project_df['planned_start'].map(lambda d: d.toordinal()), color='lightblue', label='Planned')
+    ax.barh(y_pos, project_df['actual_duration'], left=project_df['actual_start'].map(lambda d: d.toordinal()), color='orange', alpha=0.6, label='Actual')
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(project_df['activity'])
+    x_ticks = ax.get_xticks()
+    x_labels = [datetime.fromordinal(int(tick)).strftime('%Y-%m-%d') for tick in x_ticks]
+    ax.set_xticklabels(x_labels, rotation=45, ha='right')
+    ax.set_title(f'Gantt Chart for {project_id}')
+    ax.legend()
+    plt.tight_layout()
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    plt.close(fig)
+    buf.seek(0)
+    return buf
 
-    if all_data:
-        df = pd.DataFrame(all_data)
-        df["Activity ID"] = df["Activity ID"].astype(str).str.strip()
+def delay_cause_analysis(df):
+    delays = df[df['delay_days'] > 0]
+    cause_counts = delays['delay_reason'].value_counts().reset_index()
+    cause_counts.columns = ['delay_reason', 'count']
+    return cause_counts
 
-        df["Start Date"] = pd.to_datetime(df["Start Date"], format="%m-%d-%y", errors="coerce")
-        df["Finish Date"] = pd.to_datetime(df["Finish Date"], format="%m-%d-%y", errors="coerce")
-        invalid = df[df["Start Date"].isna() | df["Finish Date"].isna()]
-        if not invalid.empty:
-            st.warning(f"⚠️ {len(invalid)} rows with invalid date format detected:")
-            st.dataframe(invalid)
-        df.dropna(subset=["Start Date", "Finish Date"], inplace=True)
-        np.random.seed(42)
-        df["% Complete"] = np.random.randint(30, 100, size=len(df))
-        df.sort_values(by=["Project Code", "Start Date"], inplace=True)
-        df["Prev Finish"] = df.groupby("Project Code")["Finish Date"].shift(1)
-        df["Out of Sequence"] = df["Start Date"] < df["Prev Finish"]
+def plot_delay_causes(cause_counts):
+    if cause_counts.empty:
+        return None
+    fig, ax = plt.subplots()
+    sns.barplot(x='count', y='delay_reason', data=cause_counts, ax=ax)
+    ax.set_title('Delay Causes Frequency')
+    plt.tight_layout()
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    plt.close(fig)
+    buf.seek(0)
+    return buf
 
-        # Compute advanced KPIs
-        df = compute_ev_metrics(df)
-        df = productivity_metrics(df)
+def plot_cost_variance_waterfall(summary_df):
+    diffs = summary_df['total_cost'] - (summary_df['total_planned_duration'] * (summary_df['total_cost'] / summary_df['total_planned_duration']))
+    fig, ax = plt.subplots()
+    colors = ['red' if x > 0 else 'green' for x in diffs]
+    ax.bar(summary_df['project_id'], diffs, color=colors)
+    ax.set_title('Cost Variance Waterfall')
+    return fig
 
-        # Duplicate detection
-        dup_ids = df["Activity ID"][df["Activity ID"].duplicated(keep=False)].unique()
-        st.write(f"Duplicate Activity IDs found: {len(dup_ids)}")
+def plot_delay_heatmap(df):
+    delay_matrix = pd.crosstab(df['activity'], df['delay_reason'])
+    fig, ax = plt.subplots(figsize=(10,6))
+    sns.heatmap(delay_matrix, annot=True, fmt='d', cmap='Reds', ax=ax)
+    ax.set_title('Delay Causes Heatmap')
+    return fig
 
-        repeated_df = df[df["Activity ID"].isin(dup_ids)].copy()
-        if not repeated_df.empty:
-            repeated_df["Phase"] = repeated_df["Activity Name"].apply(categorize_activity)
-            repeated_df.sort_values(by=["Phase", "Activity ID", "Project Code", "Start Date"], inplace=True)
+def validate_data(df):
+    issues = []
+    if (df['actual_end'] < df['actual_start']).any():
+        issues.append("Actual end date before start date found.")
+    if (df['planned_end'] < df['planned_start']).any():
+        issues.append("Planned end date before start date found.")
+    if (df[['cost', 'labor_hours', 'actual_duration']] < 0).any().any():
+        issues.append("Negative values detected in cost/labor/duration.")
+    return issues
 
-        # Tabs
-        tabs = st.tabs([
-            "📋 Extracted Data", "🔁 Repeated Activities", "📅 Timeline & Insights",
-            "📤 Upload Summary", "📄 Reports & Upload", "📊 Advanced KPIs & Diagnostics"
-        ])
+def generate_narrative(summary_df):
+    narrative = ""
+    for _, row in summary_df.iterrows():
+        narrative += f"Project {row['project_id']} has an average schedule performance index of {row['avg_spi']:.2f}, "
+        if row['avg_spi'] < 1:
+            narrative += "indicating it is behind schedule. "
+        else:
+            narrative += "indicating it is on or ahead of schedule. "
+    return narrative
 
-        # Tab 0: Extracted data
-        with tabs[0]:
-            st.header("📋 Extracted Data Table")
-            st.dataframe(df, use_container_width=True)
+# PDF report generation class and function
+class PDFReport(FPDF):
+    def header(self):
+        self.set_font('Arial', 'B', 16)
+        self.cell(0, 10, 'Construction Project Analysis Report', 0, 1, 'C')
+        self.ln(10)
+    def chapter_title(self, title):
+        self.set_font('Arial', 'B', 14)
+        self.cell(0, 10, title, 0, 1)
+        self.ln(4)
+    def chapter_body(self, text):
+        self.set_font('Arial', '', 12)
+        self.multi_cell(0, 10, text)
+        self.ln(5)
+    def add_image(self, img_buffer, w=180):
+        with tempfile.NamedTemporaryFile(delete=True, suffix=".png") as tmpfile:
+            tmpfile.write(img_buffer.getbuffer())
+            tmpfile.flush()
+            self.image(tmpfile.name, w=w)
+            self.ln(10)
 
-        # Tab 1: Repeated activities with project filter dropdown
-        with tabs[1]:
-            st.header("🔁 Repeated Activities")
-            if not repeated_df.empty:
-                project_options = ["All Projects"] + sorted(repeated_df["Project Name"].unique())
-                selected_project = st.selectbox("Filter by Project Name", project_options)
+def generate_pdf_report(df, summary_df, delay_causes):
+    pdf = PDFReport()
+    pdf.add_page()
+    pdf.chapter_title('Project Summary')
+    for _, row in summary_df.iterrows():
+        txt = (f"Project: {row['project_id']}\n"
+               f"Planned Duration: {row['total_planned_duration']} days\n"
+               f"Actual Duration: {row['total_actual_duration']} days\n"
+               f"Schedule Variance: {row['schedule_variance']} days\n"
+               f"Average SPI: {row['avg_spi']:.2f}\n"
+               f"Total Labor Hours: {row['total_labor_hours']}\n"
+               f"Total Cost: ${row['total_cost']}\n"
+               f"Total Delay Days: {row['total_delay_days']}\n")
+        pdf.chapter_body(txt)
+        gantt_img = plot_gantt_chart(df, row['project_id'])
+        if gantt_img:
+            pdf.add_image(gantt_img)
+    pdf.chapter_title('Delay Cause Analysis')
+    if delay_causes.empty:
+        pdf.chapter_body("No delays reported across projects.")
+    else:
+        pdf.chapter_body("Frequency of delay causes across projects:")
+        delay_img = plot_delay_causes(delay_causes)
+        if delay_img:
+            pdf.add_image(delay_img)
+    pdf_output = io.BytesIO()
+    pdf.output(pdf_output)
+    pdf_output.seek(0)
+    return pdf_output
 
-                if selected_project != "All Projects":
-                    filtered_df = repeated_df[repeated_df["Project Name"] == selected_project]
-                else:
-                    filtered_df = repeated_df
+# === Streamlit App UI ===
 
-                if filtered_df.empty:
-                    st.info(f"✅ No repeated activities found for project: {selected_project}")
-                else:
-                    for phase, phase_group in filtered_df.groupby("Phase"):
-                        st.markdown(f"### {phase}")
-                        with st.expander(f"View repeated activities in {phase}"):
-                            st.dataframe(phase_group[[
-                                "Activity ID", "Activity Name", "Project Code", "Project Name",
-                                "Duration", "Start Date", "Finish Date", "Float", "Notes"
-                            ]].reset_index(drop=True), use_container_width=True)
-            else:
-                st.info("✅ No repeated activities found.")
+def main():
+    st.title("📄 Project Schedule PDF Extractor, Storage & Analysis")
 
-        # Tab 2: Timeline & weather
-        with tabs[2]:
-            st.header("📅 Activity Timeline & Summary Insights")
-            col1, col2, col3 = st.columns(3)
-            col1.metric("🗂 Total Activities", len(df))
-            col2.metric("📁 Projects", df["Project Code"].nunique())
-            col3.metric("🚨 Zero Float Tasks", len(df[df["Float"] == 0]))
+    # Initialize DB
+    init_db()
 
-            project = st.selectbox("Select a project", sorted(df["Project Name"].unique()))
-            project_df = df[df["Project Name"] == project].sort_values(by="Start Date")
+    # Tabs for different sections
+    tabs = st.tabs([
+        "PDF Upload & Extraction",
+        "Stored Activities",
+        "Advanced KPIs & Diagnostics",
+        "Executive Summary"
+    ])
 
-            loc = st.text_input("Enter project location (city name) for 7-day weather forecast")
-            forecast_data = get_weather_forecast(loc) if loc else None
+    # === Tab 0: PDF Upload & Extraction ===
+    with tabs[0]:
+        st.header("Upload Project Schedule PDFs")
+        uploaded_files = st.file_uploader(
+            "Upload one or more project schedule PDFs",
+            type=['pdf'],
+            accept_multiple_files=True
+        )
 
-            if forecast_data:
-                st.subheader(f"🌦 7-Day Weather Forecast for {loc}")
-                html_blocks, alerts = render_weather_forecast(forecast_data)
+        all_data = []
 
-                st.markdown("""
-                <style>
-                    .weather-description {
-                        color: #ccc;
-                    }
-                </style>
-                """, unsafe_allow_html=True)
+        if uploaded_files:
+            # Mock extraction from PDFs (replace with real extraction logic)
+            for i, pdf_file in enumerate(uploaded_files):
+                for line in range(1, 6):
+                    all_data.append({
+                        "Project Code": f"PC-{i+1}",
+                        "Project Name": f"Project {i+1}",
+                        "Activity ID": f"A{i+1}-{line}",
+                        "Activity Name": f"Activity {line} from PDF {pdf_file.name}",
+                        "Duration": 5 + line,
+                        "Start Date": pd.Timestamp("2025-01-01") + pd.Timedelta(days=line),
+                        "Finish Date": pd.Timestamp("2025-01-06") + pd.Timedelta(days=line),
+                        "Float": 0,
+                        "Notes": None
+                    })
+            df = pd.DataFrame(all_data)
+            st.header("Extracted Activity Data Preview")
+            st.dataframe(df)
 
-                for block in html_blocks:
-                    st.markdown(block, unsafe_allow_html=True)
+            # Download extracted CSV & Excel
+            csv_data = df.to_csv(index=False).encode('utf-8')
+            st.download_button("⬇️ Download extracted data as CSV", csv_data, "extracted_activities.csv", "text/csv")
 
-                if alerts:
-                    st.error("🚨 Upcoming Weather Alerts:")
-                    for alert in alerts:
-                        st.markdown(f"- {alert}")
-                else:
-                    st.success("✅ No severe weather expected.")
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                df.to_excel(writer, index=False, sheet_name='Activities')
+            processed_data = output.getvalue()
+            st.download_button("⬇️ Download extracted data as Excel", processed_data, "extracted_activities.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-            if not project_df.empty:
-                project_df["Weather Delay Risk"] = project_df["Start Date"].apply(
-                    lambda d: is_weather_delay(d, forecast_data)) if forecast_data else False
+            if st.button("💾 Save extracted data to local database"):
+                save_activities_to_db(all_data)
+                st.success(f"Saved {len(all_data)} rows to local database!")
 
-                gantt = alt.Chart(project_df).mark_bar().encode(
-                    x='Start Date:T', x2='Finish Date:T',
-                    y=alt.Y('Activity Name:N', sort='-x'),
-                    color=alt.Color('Float:Q', scale=alt.Scale(scheme='blues')),
-                    tooltip=['Activity ID', 'Activity Name', 'Start Date', 'Finish Date', 'Float', 'Weather Delay Risk']
-                ).properties(width=900, height=400, title=f"Gantt – {project}")
-                st.altair_chart(gantt, use_container_width=True)
+            if st.button("📎 Combine all uploaded PDFs into one file"):
+                merger = PdfMerger()
+                for pdf_file in uploaded_files:
+                    pdf_file.seek(0)
+                    merger.append(pdf_file)
+                combined_pdf_path = f"combined_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                merger.write(combined_pdf_path)
+                merger.close()
+                with open(combined_pdf_path, "rb") as f:
+                    st.download_button("⬇️ Download Combined PDF", f, combined_pdf_path, "application/pdf")
+                st.success("Combined PDF ready for download!")
+        else:
+            st.info("Upload PDFs to extract and store project activity data.")
 
-                float_threshold = st.slider("Highlight tasks with float ≤", 0, 20, 5)
-                critical_df = project_df[project_df["Float"] <= float_threshold]
+    # === Tab 1: Stored Activities ===
+    with tabs[1]:
+        st.header("📂 Previously Stored Activities")
+        stored_data = load_activities_from_db()
+        if stored_data:
+            stored_df = pd.DataFrame(stored_data)
+            st.dataframe(stored_df)
+        else:
+            st.info("No stored data found in local database yet.")
 
-                if not critical_df.empty:
-                    st.warning(f"⚠️ {len(critical_df)} task(s) have float ≤ {float_threshold} days.")
+    # === Tab 2: Advanced KPIs & Diagnostics ===
+    with tabs[2]:
+        st.header("📊 Advanced KPIs & Diagnostics")
 
-                    def highlight_weather_delay(row):
-                        return ['background-color: yellow'] * len(row) if row["Weather Delay Risk"] else [''] * len(row)
+        # For example purpose: reuse sample data and calculations here
+        hist_df = load_sample_data()
+        hist_df = calculate_kpis(hist_df)
+        hist_df = calculate_earned_value_metrics(hist_df)
+        hist_df = calculate_productivity(hist_df)
+        summary_df = project_summary(hist_df)
+        summary_df = add_benchmarking_metrics(summary_df)
+        delay_causes = delay_cause_analysis(hist_df)
 
-                    st.dataframe(
-                        critical_df[[
-                            "Project Code", "Project Name", "Activity ID",
-                            "Activity Name", "Duration", "Start Date", "Finish Date",
-                            "Float", "Notes", "Weather Delay Risk"
-                        ]].style.apply(highlight_weather_delay, axis=1),
-                        use_container_width=True
-                    )
-                else:
-                    st.success("✅ No critical tasks found with the selected float threshold.")
+        st.subheader("Summary Table")
+        st.dataframe(summary_df)
 
-        # Tab 3: Upload extracted CSV data to Google Drive
-        with tabs[3]:
-            st.header("📤 Upload Extracted Data")
-            temp_csv = os.path.join(tempfile.gettempdir(), f"Activity_Data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
-            df.to_csv(temp_csv, index=False)
-            st.download_button("⬇️ Download CSV", data=open(temp_csv, "rb").read(),
-                               file_name=os.path.basename(temp_csv), mime="text/csv")
-            if st.button("Upload CSV to Google Drive"):
-                try:
-                    fid = upload_csv_to_drive(temp_csv, os.path.basename(temp_csv), folder_id=DRIVE_FOLDER_ID)
-                    st.success(f"Uploaded successfully! File ID: {fid}")
-                except Exception as e:
-                    st.error(f"Upload failed: {e}")
+        st.subheader("Recommendations")
+        recs = generate_recommendations(summary_df)
+        for r in recs:
+            st.write(r)
 
-        # Tab 4: Reports & Upload (PDF Report generation)
-        with tabs[4]:
-            st.header("📄 Reports & Upload")
-            project_for_report = st.selectbox("Select project for PDF report", sorted(df["Project Name"].unique()))
-            float_threshold = st.slider("Set float threshold for critical tasks", 0, 20, 5, key="pdf_float")
-            if st.button("Generate PDF Report"):
-                filtered = df[df["Project Name"] == project_for_report]
-                critical_for_report = filtered[filtered["Float"] <= float_threshold]
-                pdf_path = create_pdf_report(filtered, critical_for_report, project_for_report)
-                with open(pdf_path, "rb") as f:
-                    pdf_bytes = f.read()
-                st.download_button("⬇️ Download PDF Report", data=pdf_bytes, file_name=os.path.basename(pdf_path))
+        st.subheader("Select Project for Gantt Chart")
+        project_option = st.selectbox("Project:", summary_df['project_id'].unique(), key="adv_proj_select")
+        gantt_img_buf = plot_gantt_chart(hist_df, project_option)
+        st.image(gantt_img_buf)
 
-        # Tab 5: Advanced KPIs and Root Cause Diagnostics
-        with tabs[5]:
-            st.header("📊 Advanced KPIs & Root Cause Diagnostics")
-            project_diag = st.selectbox("Select project for diagnostics", sorted(df["Project Name"].unique()), key="diag_project")
-            diag_df = df[df["Project Name"] == project_diag]
+    # === Tab 3: Executive Summary ===
+    with tabs[3]:
+        st.header("📈 Executive Summary")
 
-            if not diag_df.empty:
-                st.subheader("Earned Value Management Metrics")
-                st.dataframe(diag_df[["Activity ID", "Activity Name", "BAC", "PV", "EV", "AC", "CPI", "SPI"]], use_container_width=True)
+        hist_df = load_sample_data()
+        hist_df = calculate_kpis(hist_df)
+        hist_df = calculate_earned_value_metrics(hist_df)
+        hist_df = calculate_productivity(hist_df)
+        summary_df = project_summary(hist_df)
+        summary_df = add_benchmarking_metrics(summary_df)
+        delay_causes = delay_cause_analysis(hist_df)
 
-                st.subheader("Monte Carlo Schedule Risk Simulation")
-                simulation_runs = st.slider("Number of Monte Carlo Simulations", 100, 5000, 1000)
-                p90_duration = monte_carlo_schedule_simulation(diag_df, simulations=simulation_runs)
-                total_duration = diag_df["Duration"].sum()
-                st.write(f"Estimated 90th percentile total project duration: {p90_duration:.1f} days (Base duration: {total_duration} days)")
+        st.subheader("Summary Table")
+        st.dataframe(summary_df)
 
-                st.subheader("Critical Path and Bottlenecks")
-                critical_path_df = identify_critical_path(diag_df)
-                if not critical_path_df.empty:
-                    st.write(f"Critical Path Tasks (zero or negative float): {len(critical_path_df)}")
-                    st.dataframe(critical_path_df[["Activity ID", "Activity Name", "Duration", "Start Date", "Finish Date", "Float"]], use_container_width=True)
-                else:
-                    st.info("No critical path tasks detected.")
+        st.subheader("Recommendations")
+        recs = generate_recommendations(summary_df)
+        for r in recs:
+            st.write(r)
 
-                st.subheader("Productivity Metrics")
-                st.dataframe(diag_df[["Activity ID", "Activity Name", "Labor Hours", "Units Output", "Labor Hours per Unit"]], use_container_width=True)
+        st.subheader("Narrative Executive Summary")
+        st.write(generate_narrative(summary_df))
 
-                st.subheader("Correlation Analysis (Float vs Cost Overrun)")
-                corr, p_value = correlation_analysis(diag_df)
-                st.write(f"Pearson correlation coefficient: {corr:.3f}")
-                st.write(f"P-value: {p_value:.3f}")
-                if p_value < 0.05:
-                    st.success("Significant correlation detected.")
-                else:
-                    st.info("No statistically significant correlation detected.")
-
-        with tabs[6]:  # Assuming your current last tab is tabs[5], this will be the 7th tab
-            st.header("📈 Executive Summary")
-        
-            # Load and process sample historical data exactly as in the provided code:
-            hist_df = load_sample_data()
-            hist_df = calculate_kpis(hist_df)
-            hist_df = calculate_earned_value_metrics(hist_df)
-            hist_df = calculate_productivity(hist_df)
-            summary_df = project_summary(hist_df)
-            summary_df = add_benchmarking_metrics(summary_df)
-            delay_causes = delay_cause_analysis(hist_df)
-        
-            st.subheader("Summary Table")
-            st.dataframe(summary_df)
-        
-            st.subheader("Recommendations")
-            recs = generate_recommendations(summary_df)
-            for r in recs:
-                st.write(r)
-        
-            st.subheader("Narrative Executive Summary")
-            st.write(generate_narrative(summary_df))
-        
-            st.subheader("Select Project for Gantt Chart")
-            project_option = st.selectbox("Project:", summary_df['project_id'].unique(), key="exec_proj_select")
-            gantt_img_buf = plot_gantt_chart(hist_df, project_option)
+        st.subheader("Select Project for Gantt Chart")
+        project_option = st.selectbox("Project:", summary_df['project_id'].unique(), key="exec_proj_select")
+        gantt_img_buf = plot_gantt_chart(hist_df, project_option)
+        if gantt_img_buf:
             st.image(gantt_img_buf)
-        
-            st.subheader("Delay Cause Analysis")
-            if delay_causes.empty:
-                st.write("No delays reported across projects.")
-            else:
-                delay_img_buf = plot_delay_causes(delay_causes)
+
+        st.subheader("Delay Cause Analysis")
+        if delay_causes.empty:
+            st.write("No delays reported across projects.")
+        else:
+            delay_img_buf = plot_delay_causes(delay_causes)
+            if delay_img_buf:
                 st.image(delay_img_buf)
-        
-            st.subheader("Cost Variance Waterfall Chart")
-            waterfall_fig = plot_cost_variance_waterfall(summary_df)
-            st.pyplot(waterfall_fig)
-        
-            st.subheader("Delay Causes Heatmap")
-            heatmap_fig = plot_delay_heatmap(hist_df)
-            st.pyplot(heatmap_fig)
-        
-            # Data validation checks
-            issues = validate_data(hist_df)
-            if issues:
-                for issue in issues:
-                    st.warning(issue)
-            else:
-                st.success("Data validation passed")
 
-    if st.button("📄 Generate PDF Analysis Report (Executive Summary)"):
-        pdf_buffer = generate_pdf_report(hist_df, summary_df, delay_causes)
-        st.download_button("⬇️ Download Analysis Report PDF", pdf_buffer, "construction_analysis_report.pdf", "application/pdf")
-        
+        st.subheader("Cost Variance Waterfall Chart")
+        waterfall_fig = plot_cost_variance_waterfall(summary_df)
+        st.pyplot(waterfall_fig)
 
-else:
-    st.info("Please upload one or more PDF files to begin processing.")
+        st.subheader("Delay Causes Heatmap")
+        heatmap_fig = plot_delay_heatmap(hist_df)
+        st.pyplot(heatmap_fig)
 
+        issues = validate_data(hist_df)
+        if issues:
+            for issue in issues:
+                st.warning(issue)
+        else:
+            st.success("Data validation passed")
 
+        if st.button("📄 Generate PDF Analysis Report (Executive Summary)"):
+            pdf_buffer = generate_pdf_report(hist_df, summary_df, delay_causes)
+            st.download_button("⬇️ Download Analysis Report PDF", pdf_buffer, "construction_analysis_report.pdf", "application/pdf")
+
+if __name__ == "__main__":
+    main()
