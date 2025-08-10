@@ -76,6 +76,7 @@ def load_activities_from_db():
     return data
 
 # === Historical Data & Analysis Functions ===
+
 def load_sample_data():
     data = [
         ['ProjectA', 'Foundation', '2025-01-01', '2025-01-10', '2025-01-01', '2025-01-12', None, 100, 5000],
@@ -99,16 +100,18 @@ def calculate_kpis(df):
     return df
 
 def calculate_earned_value_metrics(df):
-    df['BAC'] = df['cost']  # budget at completion per activity
+    # Add Earned Value KPIs
+    df['BAC'] = df['cost']  # Assuming BAC = cost per activity
     df['pct_complete'] = (df['actual_duration'] / df['planned_duration']).clip(upper=1)
     df['PV'] = df['planned_duration'] / df['planned_duration'].sum() * df['cost'].sum()
     df['EV'] = df['pct_complete'] * df['BAC']
-    df['AC'] = df['cost']  # assumed equal to cost here
+    df['AC'] = df['cost']  # Assuming actual cost equals cost here
     df['CPI'] = df['EV'] / df['AC']
-    df['SPI'] = df['EV'] / df['PV']
+    df['SPI'] = df['EV'] / df['PV']  # refined SPI based on EV/PV
     return df
 
 def identify_critical_path(df):
+    # Activities with zero float are critical path
     critical_activities = df[df['float'] == 0]
     return critical_activities
 
@@ -137,11 +140,12 @@ def add_benchmarking_metrics(summary_df):
 
 def generate_recommendations(summary_df):
     recommendations = []
+    mean_cost = summary_df['total_cost'].mean()
     for _, row in summary_df.iterrows():
         rec = f"Project {row['project_id']}: "
         if row['avg_spi'] < 1:
             rec += "Schedule behind — consider accelerating critical tasks. "
-        if row['total_cost'] > summary_df['total_cost'].mean():
+        if row['total_cost'] > mean_cost:
             rec += "Cost over budget — review expense controls. "
         recommendations.append(rec)
     return recommendations
@@ -151,6 +155,12 @@ def scenario_accelerate_critical_path(df, accel_pct=0.1):
     critical = identify_critical_path(df)
     df.loc[critical.index, 'actual_duration'] *= (1 - accel_pct)
     return df
+
+def delay_cause_analysis(df):
+    delays = df[df['delay_days'] > 0]
+    cause_counts = delays['delay_reason'].value_counts().reset_index()
+    cause_counts.columns = ['delay_reason', 'count']
+    return cause_counts
 
 def plot_gantt_chart(df, project_id):
     project_df = df[df['project_id'] == project_id]
@@ -182,12 +192,6 @@ def plot_delay_causes(cause_counts):
     plt.close(fig)
     buf.seek(0)
     return buf
-
-def delay_cause_analysis(df):
-    delays = df[df['delay_days'] > 0]
-    cause_counts = delays['delay_reason'].value_counts().reset_index()
-    cause_counts.columns = ['delay_reason', 'count']
-    return cause_counts
 
 def plot_cost_variance_waterfall(summary_df):
     diffs = summary_df['total_cost'] - (summary_df['total_planned_duration'] * (summary_df['total_cost'] / summary_df['total_planned_duration']))
@@ -360,13 +364,13 @@ def main():
     st.subheader("Summary Table")
     st.dataframe(summary_df)
 
-    st.subheader("Recommendations")
-    recs = generate_recommendations(summary_df)
-    for r in recs:
-        st.write(r)
-
-    st.subheader("Narrative Executive Summary")
+    st.subheader("Executive Summary")
     st.write(generate_narrative(summary_df))
+
+    st.subheader("Actionable Recommendations")
+    recs = generate_recommendations(summary_df)
+    for rec in recs:
+        st.write("- " + rec)
 
     st.subheader("Select Project for Gantt Chart")
     project_option = st.selectbox("Project:", summary_df['project_id'].unique())
@@ -388,17 +392,17 @@ def main():
     heatmap_fig = plot_delay_heatmap(hist_df)
     st.pyplot(heatmap_fig)
 
-    # Data validation checks
+    if st.button("📄 Generate PDF Analysis Report"):
+        pdf_buffer = generate_pdf_report(hist_df, summary_df, delay_causes)
+        st.download_button("⬇️ Download Analysis Report PDF", pdf_buffer, "construction_analysis_report.pdf", "application/pdf")
+
+    # Data validation
     issues = validate_data(hist_df)
     if issues:
         for issue in issues:
             st.warning(issue)
     else:
         st.success("Data validation passed")
-
-    if st.button("📄 Generate PDF Analysis Report"):
-        pdf_buffer = generate_pdf_report(hist_df, summary_df, delay_causes)
-        st.download_button("⬇️ Download Analysis Report PDF", pdf_buffer, "construction_analysis_report.pdf", "application/pdf")
 
 if __name__ == "__main__":
     main()
