@@ -10,6 +10,8 @@ google-auth-oauthlib
 kaleido
 PyPDF2
 matplotlib
+‎seaborn‎
+
 
 
 
