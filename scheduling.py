@@ -142,18 +142,26 @@ def compute_delay_cause_breakdown(kpi_df):
     return pd.DataFrame(items, columns=['cause', 'count'])
 
 def contractor_scorecard(kpi_df):
-    groups = kpi_df.groupby('contractor', dropna=True)
     rows = []
-    for name, g in groups:
+    for contractor, group in kpi_df.groupby('contractor', dropna=True):
         rows.append({
-            'contractor': name,
-            'projects': len(g),
-            'avg_schedule_variance_pct': g['schedule_variance_pct'].dropna().mean(),
-            'avg_cost_variance_pct': g['cost_variance_pct'].dropna().mean(),
-            'total_safety_incidents': int(g['safety_incidents'].fillna(0).sum()),
-            'avg_CPI': g['CPI'].dropna().mean()
+            "contractor": contractor,
+            "projects": len(group),
+            "avg_schedule_variance_pct": group['schedule_variance_pct'].dropna().mean() if 'schedule_variance_pct' in group.columns else None,
+            "avg_cost_variance_pct": group['cost_variance_pct'].dropna().mean() if 'cost_variance_pct' in group.columns else None,
+            "total_safety_incidents": int(group['safety_incidents'].fillna(0).sum()) if 'safety_incidents' in group.columns else 0,
+            "avg_CPI": group['CPI'].dropna().mean() if 'CPI' in group.columns else None
         })
-    return pd.DataFrame(rows).sort_values('projects', ascending=False)
+    
+    df = pd.DataFrame(rows)
+    
+    if 'projects' not in df.columns:
+        df['projects'] = 0
+    
+    if df.empty:
+        return pd.DataFrame(columns=['contractor', 'projects', 'avg_schedule_variance_pct', 'avg_cost_variance_pct', 'total_safety_incidents', 'avg_CPI'])
+    
+    return df.sort_values('projects', ascending=False)
 
 # ----------------- Caching compute-heavy functions -----------------
 @st.cache_data
@@ -467,4 +475,5 @@ def format_number(x):
 def format_percent(x):
     if x is None or (isinstance(x, float) and math.isnan(x)): return "n/a"
     return f"{x:.1f}%"
+
 
