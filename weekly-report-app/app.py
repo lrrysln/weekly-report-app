@@ -221,9 +221,10 @@ def generate_weekly_summary(df, summary_df, password):
         f'<img src="data:image/png;base64,{img_base64}">',
         "<h2>Trend Summary Table</h2>",
         trend_counts.rename_axis("Trend").reset_index().rename(columns={"index": "Trend", "Trend": "Count"}).to_html(index=False),
-        "<h2>Executive Summary</h2>",
-        summary_week_df.to_html(index=False, escape=False),
-        "<hr>"
+        "<table class='exec-summary'>",
+        summary_week_df.to_html(index=False, escape=False, classes="exec-summary", border=0),
+        "</table>",
+
     ]
 
     group_col = "Subject" if "Subject" in df_week.columns else "Store Name"
