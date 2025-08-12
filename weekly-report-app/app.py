@@ -63,7 +63,7 @@ current_year = start_of_week.year
 current_week_df = df[(df['Date'] >= start_of_week) & (df['Date'] <= end_of_week)]
 
 st.markdown(
-    f"""###  <span style='color:red'>{len(current_week_df)}</span> Submissions for the week of {start_of_week.strftime('%B %d')}–{end_of_week.strftime('%B %d')} (week {current_week_number} of the year), {current_year}""",
+    f"""### 📋 <span style='color:red'>{len(current_week_df)}</span> Submissions for the week of {start_of_week.strftime('%B %d')}–{end_of_week.strftime('%B %d')} (week {current_week_number} of the year), {current_year}""",
     unsafe_allow_html=True
 )
 
@@ -71,7 +71,7 @@ columns_to_show = ['Store Number', 'Store Name', 'CPM', 'Prototype', 'Week Label
 st.dataframe(current_week_df[columns_to_show].reset_index(drop=True), use_container_width=True)
 
 # --- Password Protected Section ---
-st.subheader("Generate Weekly Summary Report")
+st.subheader("🔐 Generate Weekly Summary Report")
 
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
@@ -85,7 +85,7 @@ if not st.session_state.authenticated:
             st.error("❌ Incorrect password.")
     st.stop()
 
-st.markdown("## Weekly Submission Volume by Year")
+st.markdown("## 🗓️ Weekly Submission Volume by Year")
 years = sorted(df['Year'].dropna().unique(), reverse=True)
 for year in years:
     with st.expander(f"📁 {year}"):
@@ -94,7 +94,7 @@ for year in years:
         for _, row in weekly_counts.iterrows():
             week = row['Week Label']
             count = row['Count']
-            with st.expander(f" {week} — {count} submission(s)"):
+            with st.expander(f"📆 {week} — {count} submission(s)"):
                 st.dataframe(year_data[year_data['Week Label'] == week].reset_index(drop=True))
 
 # --- Data for Summary ---
@@ -171,7 +171,7 @@ def create_trend_figure(trend_counts):
     ax.bar(trend_counts.index, trend_counts.values, color=[hex_colors.get(x, "#999") for x in trend_counts.index])
     ax.set_ylabel("Count")
     ax.set_xlabel("Trend")
-    ax.set_title("Store Opening Trend Breakdown")
+    ax.set_title("📊 Store Opening Trend Breakdown")
     ax.grid(axis='y', linestyle='--', alpha=0.7)
     plt.tight_layout()
     return fig
@@ -194,7 +194,7 @@ def generate_weekly_summary(df, summary_df, password):
 
     html = [
         "<html><head><style>",
-        "body{font-family:Arial;padding:20px;width:100%;margin:0;}",
+        "body{font-family:Arial;padding:20px}",
         "h1{text-align:center}",
         "h2{background:#cce5ff;padding:10px;border-radius:4px}",
         ".entry{border:1px solid #ccc;padding:10px;margin:10px 0;border-radius:4px;background:#f9f9f9}",
@@ -203,18 +203,15 @@ def generate_weekly_summary(df, summary_df, password):
         "table {border-collapse: collapse; width: 100%; text-align: center;}",
         "th, td {border: 1px solid #ddd; padding: 8px; text-align: center;}",
         "th {background-color: #f2f2f2; text-decoration: underline;}",
-        "img {width: 100%; height: auto; display: block; margin: auto;}",  # full-width chart
         "</style></head><body>",
         f"<h1>{year} Week: {week_number} Weekly Summary Report</h1>",
-        f'<img src="data:image/png;base64,{img_base64}">',  # no max-width cap
+        f'<img src="data:image/png;base64,{img_base64}" style="max-width:800px; display:block; margin:auto;">',
         "<h2>Trend Summary Table</h2>",
-        trend_counts.rename_axis("Trend").reset_index()
-            .rename(columns={"index": "Trend", "Trend": "Count"}).to_html(index=False),
+        trend_counts.rename_axis("Trend").reset_index().rename(columns={"index": "Trend", "Trend": "Count"}).to_html(index=False),
         "<h2>Executive Summary</h2>",
         summary_df.to_html(index=False, escape=False),
         "<hr>"
     ]
-    # ... (rest of your function unchanged)
 
     group_col = "Subject" if "Subject" in df.columns else "Store Name"
     for group_name, group_df in df.groupby(group_col):
@@ -260,34 +257,8 @@ def generate_weekly_summary(df, summary_df, password):
 if st.button("Generate Detailed Weekly Summary Report"):
     df_result, html = generate_weekly_summary(df, summary_df, password="1234")
     if html:
-        st.markdown("### Weekly Summary", unsafe_allow_html=True)
-
-        # Full-width HTML, no fixed iframe width
-        st.components.v1.html(
-            f"""
-            <style>
-            body, html {{
-                margin: 0;
-                padding: 0;
-                width: 100%;
-                overflow-x: auto;
-            }}
-            table {{
-                width: 100% !important;
-            }}
-            img {{
-                max-width: 100% !important;
-                height: auto;
-            }}
-            </style>
-            <div style="width: 100%;">
-                {html}
-            </div>
-            """,
-            height=1400,   # You can increase if content is taller
-            scrolling=False  # Prevents inner scrollbars
-        )
-
+        st.markdown("### Weekly Summary")
+        st.components.v1.html(html, height=1000, scrolling=True)
         st.download_button(
             label="📥 Download Summary as HTML",
             data=html.encode('utf-8'),
