@@ -194,7 +194,7 @@ def generate_weekly_summary(df, summary_df, password):
 
     html = [
         "<html><head><style>",
-        "body{font-family:Arial;padding:20px}",
+        "body{font-family:Arial;padding:20px;width:100%;margin:0;}",
         "h1{text-align:center}",
         "h2{background:#cce5ff;padding:10px;border-radius:4px}",
         ".entry{border:1px solid #ccc;padding:10px;margin:10px 0;border-radius:4px;background:#f9f9f9}",
@@ -203,15 +203,18 @@ def generate_weekly_summary(df, summary_df, password):
         "table {border-collapse: collapse; width: 100%; text-align: center;}",
         "th, td {border: 1px solid #ddd; padding: 8px; text-align: center;}",
         "th {background-color: #f2f2f2; text-decoration: underline;}",
+        "img {width: 100%; height: auto; display: block; margin: auto;}",  # full-width chart
         "</style></head><body>",
         f"<h1>{year} Week: {week_number} Weekly Summary Report</h1>",
-        f'<img src="data:image/png;base64,{img_base64}" style="max-width:800px; display:block; margin:auto;">',
+        f'<img src="data:image/png;base64,{img_base64}">',  # no max-width cap
         "<h2>Trend Summary Table</h2>",
-        trend_counts.rename_axis("Trend").reset_index().rename(columns={"index": "Trend", "Trend": "Count"}).to_html(index=False),
+        trend_counts.rename_axis("Trend").reset_index()
+            .rename(columns={"index": "Trend", "Trend": "Count"}).to_html(index=False),
         "<h2>Executive Summary</h2>",
         summary_df.to_html(index=False, escape=False),
         "<hr>"
     ]
+    # ... (rest of your function unchanged)
 
     group_col = "Subject" if "Subject" in df.columns else "Store Name"
     for group_name, group_df in df.groupby(group_col):
