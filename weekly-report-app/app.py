@@ -183,14 +183,17 @@ def fig_to_base64(fig):
     return base64.b64encode(buf.read()).decode()
 
 def generate_weekly_summary(df, summary_df, password):
+    # Determine current week range
     today = datetime.date.today()
     start_of_week = today - datetime.timedelta(days=today.weekday() + 1 if today.weekday() != 6 else 0)
     start_of_week = start_of_week if today.weekday() != 6 else today
     end_of_week = start_of_week + datetime.timedelta(days=6)
 
+    # Filter both dfs to current week
     df_week = df[(df['Date'] >= start_of_week) & (df['Date'] <= end_of_week)].copy()
     summary_week_df = summary_df[summary_df['Store Number'].isin(df_week['Store Number'])].copy()
 
+    # Trend counts for this week only
     trend_order = ["pulled in", "pushed", "held", "baseline", "no baseline dates"]
     trend_counts = summary_week_df['Trend'].value_counts().reindex(trend_order, fill_value=0)
     fig = create_trend_figure(trend_counts)
@@ -201,32 +204,27 @@ def generate_weekly_summary(df, summary_df, password):
 
     html = [
         "<html><head><style>",
-        "body {font-family: Arial, sans-serif; padding: 20px; margin: 0 auto; max-width: 1200px; width: 95%; background-color: #fff;}",
-        "h1 {text-align: center; font-size: 2em;}",
-        "h2 {background: #cce5ff; padding: 10px; border-radius: 4px; font-size: 1.4em;}",
-        ".entry {border: 1px solid #ccc; padding: 10px; margin: 10px 0; border-radius: 4px; background: #f9f9f9;}",
-        ".label {font-weight: bold;}",
-        "table {border-collapse: collapse; width: 100%; table-layout: fixed; word-wrap: break-word;}",
-        "th, td {border: 1px solid #ddd; padding: 8px; text-align: center; word-wrap: break-word;}",
+        "body{font-family:Arial;padding:20px;width:100%;margin:0;}",
+        "h1{text-align:center}",
+        "h2{background:#cce5ff;padding:10px;border-radius:4px}",
+        ".entry{border:1px solid #ccc;padding:10px;margin:10px 0;border-radius:4px;background:#f9f9f9}",
+        "ul{margin:0;padding-left:20px}",
+        ".label{font-weight:bold}",
+        "table {border-collapse: collapse; width: 100%; text-align: center;}",
+        "th, td {border: 1px solid #ddd; padding: 8px; text-align: center;}",
         "th {background-color: #f2f2f2; text-decoration: underline;}",
-        "img {max-width: 90%; height: auto; display: block; margin: 20px auto;}",
-        "ul {margin: 0; padding-left: 20px;}",
-        "li {margin-bottom: 4px;}",
-
-        # Optional mobile responsiveness
-        "@media (max-width: 768px) { body {padding: 10px;} h1 {font-size: 1.4em;} h2 {font-size: 1.1em;} }",
-
+        "img {width: 100%; height: auto; display: block; margin: auto;}",
         "</style></head><body>",
         f"<h1>{year} Week: {week_number} Weekly Summary Report</h1>",
         f'<img src="data:image/png;base64,{img_base64}">',
         "<h2>Trend Summary Table</h2>",
         trend_counts.rename_axis("Trend").reset_index().rename(columns={"index": "Trend", "Trend": "Count"}).to_html(index=False),
-        "<table class='exec-summary'>",
-        summary_week_df.to_html(index=False, escape=False, classes="exec-summary", border=0),
-        "</table>",
-
+        "<h2>Executive Summary</h2>",
+        summary_week_df.to_html(index=False, escape=False),
+        "<hr>"
     ]
 
+    # Group only the current week's records
     group_col = "Subject" if "Subject" in df_week.columns else "Store Name"
     for group_name, group_df in df_week.groupby(group_col):
         html.append(f"<h2>{group_name}</h2>")
