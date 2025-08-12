@@ -258,7 +258,31 @@ if st.button("Generate Detailed Weekly Summary Report"):
     df_result, html = generate_weekly_summary(df, summary_df, password="1234")
     if html:
         st.markdown("### Weekly Summary")
-        st.components.v1.html(html, height=1000, scrolling=True)
+
+        # Make HTML take full width
+        st.components.v1.html(
+            f"""
+            <style>
+            body, html {{
+                margin: 0;
+                padding: 0;
+                width: 100%;
+                overflow-x: auto;
+            }}
+            table {{
+                width: 100% !important;
+            }}
+            img {{
+                max-width: 100% !important;
+                height: auto;
+            }}
+            </style>
+            {html}
+            """,
+            height=1000,
+            scrolling=True
+        )
+
         st.download_button(
             label="📥 Download Summary as HTML",
             data=html.encode('utf-8'),
@@ -266,3 +290,4 @@ if st.button("Generate Detailed Weekly Summary Report"):
             mime="text/html",
             use_container_width=True
         )
+
