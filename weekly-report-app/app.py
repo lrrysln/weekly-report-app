@@ -257,9 +257,9 @@ def generate_weekly_summary(df, summary_df, password):
 if st.button("Generate Detailed Weekly Summary Report"):
     df_result, html = generate_weekly_summary(df, summary_df, password="1234")
     if html:
-        st.markdown("### Weekly Summary")
+        st.markdown("### Weekly Summary", unsafe_allow_html=True)
 
-        # Make HTML take full width
+        # Full-width HTML, no fixed iframe width
         st.components.v1.html(
             f"""
             <style>
@@ -277,10 +277,12 @@ if st.button("Generate Detailed Weekly Summary Report"):
                 height: auto;
             }}
             </style>
-            {html}
+            <div style="width: 100%;">
+                {html}
+            </div>
             """,
-            height=1000,
-            scrolling=True
+            height=1400,   # You can increase if content is taller
+            scrolling=False  # Prevents inner scrollbars
         )
 
         st.download_button(
@@ -290,4 +292,3 @@ if st.button("Generate Detailed Weekly Summary Report"):
             mime="text/html",
             use_container_width=True
         )
-
