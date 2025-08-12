@@ -85,7 +85,7 @@ if not st.session_state.authenticated:
             st.error("❌ Incorrect password.")
     st.stop()
 
-st.markdown("## 🗓️ Weekly Submission Volume by Year")
+st.markdown("## Weekly Submission Volume by Year")
 years = sorted(df['Year'].dropna().unique(), reverse=True)
 for year in years:
     with st.expander(f"📁 {year}"):
@@ -94,7 +94,7 @@ for year in years:
         for _, row in weekly_counts.iterrows():
             week = row['Week Label']
             count = row['Count']
-            with st.expander(f"📆 {week} — {count} submission(s)"):
+            with st.expander(f" {week} — {count} submission(s)"):
                 st.dataframe(year_data[year_data['Week Label'] == week].reset_index(drop=True))
 
 # --- Data for Summary ---
