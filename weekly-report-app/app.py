@@ -63,7 +63,7 @@ current_year = start_of_week.year
 current_week_df = df[(df['Date'] >= start_of_week) & (df['Date'] <= end_of_week)]
 
 st.markdown(
-    f"""### 📋 <span style='color:red'>{len(current_week_df)}</span> Submissions for the week of {start_of_week.strftime('%B %d')}–{end_of_week.strftime('%B %d')} (week {current_week_number} of the year), {current_year}""",
+    f"""### <span style='color:red'>{len(current_week_df)}</span> Submissions for the week of {start_of_week.strftime('%B %d')}–{end_of_week.strftime('%B %d')} (week {current_week_number} of the year), {current_year}""",
     unsafe_allow_html=True
 )
 
@@ -71,7 +71,7 @@ columns_to_show = ['Store Number', 'Store Name', 'CPM', 'Prototype', 'Week Label
 st.dataframe(current_week_df[columns_to_show].reset_index(drop=True), use_container_width=True)
 
 # --- Password Protected Section ---
-st.subheader("🔐 Generate Weekly Summary Report")
+st.subheader("Generate Weekly Summary Report")
 
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
@@ -171,7 +171,7 @@ def create_trend_figure(trend_counts):
     ax.bar(trend_counts.index, trend_counts.values, color=[hex_colors.get(x, "#999") for x in trend_counts.index])
     ax.set_ylabel("Count")
     ax.set_xlabel("Trend")
-    ax.set_title("📊 Store Opening Trend Breakdown")
+    ax.set_title("Store Opening Trend Breakdown")
     ax.grid(axis='y', linestyle='--', alpha=0.7)
     plt.tight_layout()
     return fig
