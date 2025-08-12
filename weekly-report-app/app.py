@@ -183,18 +183,28 @@ def fig_to_base64(fig):
     return base64.b64encode(buf.read()).decode()
 
 def generate_weekly_summary(df, summary_df, password):
+    # Determine current week range
+    today = datetime.date.today()
+    start_of_week = today - datetime.timedelta(days=today.weekday() + 1 if today.weekday() != 6 else 0)
+    start_of_week = start_of_week if today.weekday() != 6 else today
+    end_of_week = start_of_week + datetime.timedelta(days=6)
+
+    # Filter both dfs to current week
+    df_week = df[(df['Date'] >= start_of_week) & (df['Date'] <= end_of_week)].copy()
+    summary_week_df = summary_df[summary_df['Store Number'].isin(df_week['Store Number'])].copy()
+
+    # Trend counts for this week only
     trend_order = ["pulled in", "pushed", "held", "baseline", "no baseline dates"]
-    trend_counts = summary_df['Trend'].value_counts().reindex(trend_order, fill_value=0)
+    trend_counts = summary_week_df['Trend'].value_counts().reindex(trend_order, fill_value=0)
     fig = create_trend_figure(trend_counts)
     img_base64 = fig_to_base64(fig)
 
-    today = datetime.date.today()
     week_number = today.isocalendar()[1]
     year = today.year
 
     html = [
         "<html><head><style>",
-        "body{font-family:Arial;padding:20px}",
+        "body{font-family:Arial;padding:20px;width:100%;margin:0;}",
         "h1{text-align:center}",
         "h2{background:#cce5ff;padding:10px;border-radius:4px}",
         ".entry{border:1px solid #ccc;padding:10px;margin:10px 0;border-radius:4px;background:#f9f9f9}",
@@ -203,18 +213,20 @@ def generate_weekly_summary(df, summary_df, password):
         "table {border-collapse: collapse; width: 100%; text-align: center;}",
         "th, td {border: 1px solid #ddd; padding: 8px; text-align: center;}",
         "th {background-color: #f2f2f2; text-decoration: underline;}",
+        "img {width: 100%; height: auto; display: block; margin: auto;}",
         "</style></head><body>",
         f"<h1>{year} Week: {week_number} Weekly Summary Report</h1>",
-        f'<img src="data:image/png;base64,{img_base64}" style="max-width:800px; display:block; margin:auto;">',
+        f'<img src="data:image/png;base64,{img_base64}">',
         "<h2>Trend Summary Table</h2>",
         trend_counts.rename_axis("Trend").reset_index().rename(columns={"index": "Trend", "Trend": "Count"}).to_html(index=False),
         "<h2>Executive Summary</h2>",
-        summary_df.to_html(index=False, escape=False),
+        summary_week_df.to_html(index=False, escape=False),
         "<hr>"
     ]
 
-    group_col = "Subject" if "Subject" in df.columns else "Store Name"
-    for group_name, group_df in df.groupby(group_col):
+    # Group only the current week's records
+    group_col = "Subject" if "Subject" in df_week.columns else "Store Name"
+    for group_name, group_df in df_week.groupby(group_col):
         html.append(f"<h2>{group_name}</h2>")
         for _, row in group_df.iterrows():
             html.append(f"<div style='font-weight:bold; font-size:1.2em;'>{row.get('Store Number', '')} - {row.get('Store Name', '')}, {row.get('Prototype', '')} ({row.get('CPM', '')})</div>")
@@ -223,7 +235,6 @@ def generate_weekly_summary(df, summary_df, password):
             html.append("<li><span class='label'>Dates:</span><ul>")
             for field in date_fields:
                 val = row.get(field)
-                # Try to parse val as date if it's a string
                 try:
                     if isinstance(val, str) and val.strip():
                         val_date = pd.to_datetime(val, errors='coerce')
@@ -237,7 +248,6 @@ def generate_weekly_summary(df, summary_df, password):
                     else:
                         val = "N/A"
                 except Exception:
-                    # fallback to raw string if parsing fails
                     val = str(val) if val else "N/A"
 
                 html.append(f"<li style='margin-left: 40px;'><u>{field}</u>: {val}</li>")
@@ -252,7 +262,8 @@ def generate_weekly_summary(df, summary_df, password):
             html.append("</ul></div>")
 
     html.append("</body></html>")
-    return df, "".join(html)
+    return df_week, "".join(html)
+
 
 if st.button("Generate Detailed Weekly Summary Report"):
     df_result, html = generate_weekly_summary(df, summary_df, password="1234")
