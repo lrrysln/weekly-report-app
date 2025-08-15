@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass
 from typing import List, Dict, Tuple
 import concurrent.futures
-from multiprocessing import Pool
 import json
 
 @dataclass
@@ -179,11 +178,8 @@ class ConstructionScenarioSimulator:
         current_date = params.start_date
         completed_tasks = set()
         
-        # Simulate each task
         for task_name, template in self.task_templates.items():
-            # Check dependencies
             if not all(dep in completed_tasks for dep in template.dependencies):
-                # Calculate dependency delay
                 max_dependency_end = current_date
                 for dep in template.dependencies:
                     dep_end = self._get_task_end_date(scenario_result['tasks'], dep)
@@ -191,16 +187,12 @@ class ConstructionScenarioSimulator:
                         max_dependency_end = dep_end
                 current_date = max_dependency_end
             
-            # Simulate task execution
-            task_result = self._simulate_task_execution(
-                template, current_date, params, scenario_id
-            )
+            task_result = self._simulate_task_execution(template, current_date, params, scenario_id)
             
             scenario_result['tasks'].append(task_result)
             scenario_result['total_cost'] += task_result['actual_cost']
             scenario_result['total_duration'] = (task_result['end_date'] - params.start_date).days
             
-            # Accumulate delays
             for delay in task_result['delays']:
                 scenario_result['delay_events'].append(delay)
                 if delay['type'] == 'weather':
@@ -219,24 +211,20 @@ class ConstructionScenarioSimulator:
                                 params: SimulationParameters, seed: int) -> Dict:
         """Simulate execution of a single task with all uncertainty factors"""
         
-        # Base duration with uncertainty
         duration_uncertainty = np.random.triangular(
             template.min_duration, 
             template.base_duration, 
             template.max_duration
         )
         
-        # Apply seasonal multiplier
         seasonal_factor = self.seasonal_multipliers.get(start_date.month, 1.0)
         adjusted_duration = duration_uncertainty * seasonal_factor
         
-        # Apply location-specific factors
         location_factor = self._get_location_factor(params.location)
         adjusted_duration *= location_factor
         
-        # Apply crew size factor
         crew_efficiency = min(1.2, params.crew_size / template.crew_required)
-        if crew_efficiency < 0.8:  # Understaffed penalty
+        if crew_efficiency < 0.8:
             adjusted_duration *= 1.25
         else:
             adjusted_duration /= crew_efficiency
@@ -244,7 +232,6 @@ class ConstructionScenarioSimulator:
         task_delays = []
         delay_days = 0
         
-        # Weather delays
         if template.weather_sensitive:
             weather_delay = self._simulate_weather_delay(start_date, params, seed)
             if weather_delay > 0:
@@ -255,7 +242,6 @@ class ConstructionScenarioSimulator:
                 })
                 delay_days += weather_delay
         
-        # Supply chain delays
         if np.random.random() < self.delay_factors['supply_chain']['material_delay_prob']:
             supply_delay = np.random.randint(*self.delay_factors['supply_chain']['material_delay_range'])
             task_delays.append({
@@ -265,7 +251,6 @@ class ConstructionScenarioSimulator:
             })
             delay_days += supply_delay
         
-        # Permit delays
         if template.name in ['Foundation', 'MEP Rough-In', 'Finishes']:
             if np.random.random() < self.delay_factors['permits']['delay_prob']:
                 permit_delay = np.random.randint(*self.delay_factors['permits']['delay_range'])
@@ -276,7 +261,6 @@ class ConstructionScenarioSimulator:
                 })
                 delay_days += permit_delay
         
-        # Holiday delays
         holiday_delay = self._calculate_holiday_delays(start_date, adjusted_duration + delay_days)
         if holiday_delay > 0:
             task_delays.append({
@@ -286,14 +270,12 @@ class ConstructionScenarioSimulator:
             })
             delay_days += holiday_delay
         
-        # Calculate final dates and costs
         total_duration = adjusted_duration + delay_days
         end_date = start_date + timedelta(days=int(total_duration))
         
-        # Cost adjustments for delays and efficiency
         cost_multiplier = 1.0
-        if delay_days > template.base_duration * 0.2:  # If delays > 20% of base duration
-            cost_multiplier += 0.1  # 10% cost overrun
+        if delay_days > template.base_duration * 0.2:
+            cost_multiplier += 0.1
         
         actual_cost = template.cost * cost_multiplier
         
@@ -310,27 +292,24 @@ class ConstructionScenarioSimulator:
         }
     
     def _simulate_weather_delay(self, start_date: datetime, params: SimulationParameters, seed: int) -> int:
-        """Simulate weather-related delays based on season and location"""
         month = start_date.month
         base_weather_prob = 0.1
         
-        # Seasonal weather risk
-        if month in [12, 1, 2]:  # Winter
+        if month in [12, 1, 2]:
             weather_prob = base_weather_prob * 2.0
-        elif month in [3, 4]:  # Spring (mud season)
+        elif month in [3, 4]:
             weather_prob = base_weather_prob * 1.5
-        elif month in [6, 7, 8, 9]:  # Hurricane/thunderstorm season
+        elif month in [6, 7, 8, 9]:
             weather_prob = base_weather_prob * 1.3
         else:
             weather_prob = base_weather_prob
         
-        # Apply location factors
         if 'florida' in params.location.lower() or 'miami' in params.location.lower():
-            weather_prob *= 1.4  # Hurricane risk
+            weather_prob *= 1.4
         elif 'minnesot' in params.location.lower() or 'alaska' in params.location.lower():
-            weather_prob *= 1.6  # Winter weather
+            weather_prob *= 1.6
         elif 'arizona' in params.location.lower() or 'nevada' in params.location.lower():
-            weather_prob *= 0.7  # Less weather risk
+            weather_prob *= 0.7
         
         if np.random.random() < weather_prob:
             return np.random.randint(*self.delay_factors['weather']['extreme_weather_delay'])
@@ -338,71 +317,47 @@ class ConstructionScenarioSimulator:
         return 0
     
     def _get_location_factor(self, location: str) -> float:
-        """Get productivity multiplier based on location"""
         location = location.lower()
-        
-        # High-productivity regions
         if any(city in location for city in ['atlanta', 'dallas', 'phoenix', 'austin']):
-            return 0.95  # 5% faster
-        
-        # Average productivity
+            return 0.95
         elif any(city in location for city in ['chicago', 'denver', 'seattle']):
             return 1.0
-        
-        # Lower productivity (high cost, regulations, weather)
         elif any(city in location for city in ['san francisco', 'new york', 'boston']):
-            return 1.15  # 15% slower
-        
-        return 1.0  # Default
+            return 1.15
+        return 1.0
     
     def _calculate_holiday_delays(self, start_date: datetime, duration: float) -> int:
-        """Calculate delays due to holidays during task execution"""
         end_date = start_date + timedelta(days=int(duration))
         holiday_days = 0
-        
         current = start_date
         while current <= end_date:
             date_str = current.strftime('%m-%d')
             if date_str in self.holiday_calendar:
-                # Add holiday + potential extended weekend
                 holiday_days += np.random.choice([1, 2, 3], p=[0.5, 0.3, 0.2])
             current += timedelta(days=1)
-        
         return holiday_days
     
     def _get_task_end_date(self, tasks: List[Dict], task_name: str) -> datetime:
-        """Get end date of a specific task from completed tasks"""
         for task in tasks:
             if task['task_name'] == task_name:
                 return task['end_date']
         return None
     
-    def run_monte_carlo_simulation(self, params: SimulationParameters, 
-                                  num_scenarios: int = 1000) -> Dict:
+    def run_monte_carlo_simulation(self, params: SimulationParameters, num_scenarios: int = 1000) -> Dict:
         """
-        Run thousands of scenarios to find optimal scheduling strategies
+        Run many scenarios to find optimal scheduling strategies.
+        Uses threads instead of processes to avoid pickling issues on Streamlit/Cloud.
         """
         print(f"Running {num_scenarios} construction scenarios...")
-        
-        # Run scenarios in parallel for speed
-        with concurrent.futures.ProcessPoolExecutor() as executor:
-            scenarios = list(range(num_scenarios))
-            results = list(executor.map(
-                lambda scenario_id: self.run_single_scenario(params, scenario_id),
-                scenarios
-            ))
-        
-        # Analyze results
+        from concurrent.futures import ThreadPoolExecutor
+        scenarios = list(range(num_scenarios))
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            results = list(executor.map(lambda sid: self.run_single_scenario(params, sid), scenarios))
         return self._analyze_simulation_results(results, params)
     
-    def _analyze_simulation_results(self, results: List[Dict], 
-                                   params: SimulationParameters) -> Dict:
-        """Analyze simulation results to extract insights and recommendations"""
-        
+    def _analyze_simulation_results(self, results: List[Dict], params: SimulationParameters) -> Dict:
         durations = [r['total_duration'] for r in results]
         costs = [r['total_cost'] for r in results]
-        
-        # Statistical analysis
         analysis = {
             'simulation_summary': {
                 'scenarios_run': len(results),
@@ -431,15 +386,12 @@ class ConstructionScenarioSimulator:
             'optimization_recommendations': self._generate_recommendations(results, params),
             'scenario_percentiles': self._categorize_scenarios(results)
         }
-        
         return analysis
     
     def _analyze_delay_patterns(self, results: List[Dict]) -> Dict:
-        """Analyze delay patterns across all scenarios"""
         all_weather_delays = [r['weather_delays'] for r in results]
         all_supply_delays = [r['supply_chain_delays'] for r in results]
         all_permit_delays = [r['permit_delays'] for r in results]
-        
         return {
             'weather_delays': {
                 'probability': len([d for d in all_weather_delays if d > 0]) / len(results),
@@ -458,16 +410,10 @@ class ConstructionScenarioSimulator:
             }
         }
     
-    def _generate_recommendations(self, results: List[Dict], 
-                                params: SimulationParameters) -> List[str]:
-        """Generate actionable recommendations based on simulation results"""
+    def _generate_recommendations(self, results: List[Dict], params: SimulationParameters) -> List[str]:
         recommendations = []
-        
-        # Analyze best performing scenarios
         sorted_results = sorted(results, key=lambda x: x['total_duration'])
         best_10_percent = sorted_results[:len(results)//10]
-        
-        # Weather recommendations
         weather_delays = [r['weather_delays'] for r in results]
         avg_weather_delay = np.mean(weather_delays)
         if avg_weather_delay > 5:
@@ -475,164 +421,4 @@ class ConstructionScenarioSimulator:
                 f"🌧️ HIGH WEATHER RISK: Average {avg_weather_delay:.1f} days weather delays. "
                 f"Consider starting 1-2 weeks earlier or adding weather buffers."
             )
-        
-        # Seasonal recommendations
         start_month = params.start_date.month
-        if start_month in [12, 1, 2]:
-            recommendations.append(
-                "❄️ WINTER START: Consider delaying start to March-April to avoid winter weather delays."
-            )
-        elif start_month in [3, 4]:
-            recommendations.append(
-                "🌱 MUD SEASON: Schedule indoor work (MEP, drywall) during worst weather periods."
-            )
-        
-        # Crew size optimization
-        best_scenarios_avg_duration = np.mean([r['total_duration'] for r in best_10_percent])
-        if best_scenarios_avg_duration < np.mean([r['total_duration'] for r in results]) * 0.9:
-            recommendations.append(
-                f"👥 CREW OPTIMIZATION: Increasing crew size to {params.crew_size + 2} could reduce "
-                f"project duration by {np.mean([r['total_duration'] for r in results]) - best_scenarios_avg_duration:.0f} days."
-            )
-        
-        # Supply chain recommendations
-        supply_delays = [r['supply_chain_delays'] for r in results]
-        if np.mean(supply_delays) > 3:
-            recommendations.append(
-                "📦 SUPPLY CHAIN RISK: Order materials 2-3 weeks earlier than standard lead times."
-            )
-        
-        # Cost-time tradeoff
-        cost_duration_correlation = np.corrcoef(
-            [r['total_cost'] for r in results],
-            [r['total_duration'] for r in results]
-        )[0,1]
-        
-        if cost_duration_correlation < -0.3:
-            recommendations.append(
-                "💰 FAST-TRACK OPPORTUNITY: Spending 10-15% more on crew/equipment could "
-                "significantly reduce project duration."
-            )
-        
-        return recommendations
-    
-    def _categorize_scenarios(self, results: List[Dict]) -> Dict:
-        """Categorize scenarios into best, worst, and typical cases"""
-        sorted_by_duration = sorted(results, key=lambda x: x['total_duration'])
-        
-        return {
-            'best_case': {
-                'duration': sorted_by_duration[0]['total_duration'],
-                'cost': sorted_by_duration[0]['total_cost'],
-                'probability': 1.0,  # Best case scenario
-                'description': 'Everything goes perfectly - no delays, optimal weather'
-            },
-            'typical_case': {
-                'duration': sorted_by_duration[len(results)//2]['total_duration'],
-                'cost': sorted_by_duration[len(results)//2]['total_cost'],
-                'probability': 50.0,
-                'description': 'Most likely outcome with normal delays and issues'
-            },
-            'worst_case': {
-                'duration': sorted_by_duration[-1]['total_duration'],
-                'cost': sorted_by_duration[-1]['total_cost'],
-                'probability': 99.0,  # 99th percentile
-                'description': 'Multiple major delays - weather, permits, supply chain'
-            },
-            'contingency_planning': {
-                'p90_duration': int(np.percentile([r['total_duration'] for r in results], 90)),
-                'p90_cost': int(np.percentile([r['total_cost'] for r in results], 90)),
-                'recommendation': 'Plan for P90 scenario - 90% chance of completing within these parameters'
-            }
-        }
-
-# Example usage and Streamlit integration
-def create_scenario_simulation_ui():
-    """Streamlit UI for the scenario simulation engine"""
-    import streamlit as st
-    
-    st.header("🎯 Construction Scenario Simulation Engine")
-    st.caption("Run thousands of scenarios to optimize your construction schedule")
-    
-    # Input parameters
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        project_name = st.text_input("Project Name", "Office Building Project")
-        location = st.selectbox("Location", [
-            "Atlanta, GA", "Dallas, TX", "Phoenix, AZ", "Chicago, IL",
-            "Denver, CO", "Seattle, WA", "San Francisco, CA", "New York, NY"
-        ])
-        start_date = st.date_input("Project Start Date", datetime.now().date())
-        project_type = st.selectbox("Project Type", [
-            "Office Building", "Retail", "Warehouse", "Apartment", "Mixed Use"
-        ])
-    
-    with col2:
-        crew_size = st.slider("Crew Size", 5, 20, 10)
-        budget = st.number_input("Budget ($)", 100000, 50000000, 1000000, 50000)
-        square_footage = st.number_input("Square Footage", 1000, 500000, 25000, 1000)
-        num_scenarios = st.slider("Number of Scenarios", 100, 5000, 1000, 100)
-    
-    if st.button("🚀 Run Simulation", type="primary"):
-        # Create simulation parameters
-        params = SimulationParameters(
-            location=location,
-            start_date=datetime.combine(start_date, datetime.min.time()),
-            crew_size=crew_size,
-            budget=budget,
-            project_type=project_type,
-            square_footage=square_footage
-        )
-        
-        # Run simulation
-        simulator = ConstructionScenarioSimulator()
-        
-        with st.spinner(f"Running {num_scenarios} scenarios..."):
-            results = simulator.run_monte_carlo_simulation(params, num_scenarios)
-        
-        # Display results
-        st.success("Simulation Complete!")
-        
-        # Key metrics
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Best Case", f"{results['duration_analysis']['min_duration']} days")
-        col2.metric("Most Likely", f"{results['duration_analysis']['median_duration']} days")
-        col3.metric("Worst Case", f"{results['duration_analysis']['max_duration']} days")
-        col4.metric("90% Confidence", f"{results['duration_analysis']['p90_duration']} days")
-        
-        # Recommendations
-        st.subheader("🎯 Optimization Recommendations")
-        for rec in results['optimization_recommendations']:
-            if "🌧️" in rec or "❄️" in rec:
-                st.warning(rec)
-            elif "💰" in rec or "👥" in rec:
-                st.info(rec)
-            else:
-                st.success(rec)
-        
-        # Detailed analysis
-        with st.expander("📊 Detailed Analysis"):
-            st.json(results)
-
-if __name__ == "__main__":
-    # Example usage
-    params = SimulationParameters(
-        location="Atlanta, GA",
-        start_date=datetime(2025, 6, 1),
-        crew_size=12,
-        budget=1500000,
-        project_type="Office Building",
-        square_footage=25000
-    )
-    
-    simulator = ConstructionScenarioSimulator()
-    results = simulator.run_monte_carlo_simulation(params, num_scenarios=1000)
-    
-    print("Simulation Results:")
-    print(f"Duration range: {results['duration_analysis']['min_duration']} - {results['duration_analysis']['max_duration']} days")
-    print(f"Most likely duration: {results['duration_analysis']['median_duration']} days")
-    print(f"90% confidence: {results['duration_analysis']['p90_duration']} days")
-    print("\nRecommendations:")
-    for rec in results['optimization_recommendations']:
-        print(f"• {rec}")
