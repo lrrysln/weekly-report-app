@@ -13,6 +13,9 @@ from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional
 from datetime import datetime, timedelta
 import concurrent.futures
+import streamlit as st
+st.set_page_config(page_title="Debug Mode", layout="wide")
+st.write("✅ App started")
 
 # ---------- Streamlit (UI) ----------
 try:
@@ -983,3 +986,4 @@ if __name__ == "__main__":
     print("Quick CLI run:")
     print(f"Median duration: {int(results['duration_analysis']['median_duration'])} days | "
           f"P90: {int(results['duration_analysis']['p90_duration'])} days")
+
