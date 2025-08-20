@@ -24,6 +24,8 @@ export default function Dashboard() {
 
   const handleDownloadPDF = async () => {
     const element = document.getElementById("dashboard-report");
+    if (!element) return;
+
     const canvas = await html2canvas(element, { scale: 2 });
     const imgData = canvas.toDataURL("image/png");
     const pdf = new jsPDF("p", "mm", "a4");
@@ -39,7 +41,7 @@ export default function Dashboard() {
     <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Construction & A&D Dashboard</h1>
+        <h1 className="text-2xl font-bold">Construction &amp; A&amp;D Dashboard</h1>
         <Button onClick={handleDownloadPDF} className="flex items-center gap-2">
           <Download size={16} /> Download PDF
         </Button>
