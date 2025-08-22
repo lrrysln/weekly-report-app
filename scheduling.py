@@ -23,6 +23,7 @@ st.set_page_config(
     page_icon="🏗️",
     layout="wide",
     initial_sidebar_state="expanded"
+)
 
 # Custom CSS for better styling
 st.markdown("""
@@ -1454,4 +1455,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
